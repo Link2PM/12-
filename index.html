@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="训练计划">
+<title>12周训练计划</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0f1e;--bg2:#111827;--bg3:#1a2235;--card:#141d2f;
+  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.14);
+  --accent:#4f8ef7;--accent2:#34c98a;--accent3:#f5a623;--accent4:#e05a5a;
+  --text:#f0f4ff;--text2:#8899bb;--text3:#4a5a7a;
+  --radius:16px;--radius-sm:10px;
+  --safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans SC',sans-serif;user-select:none}
+#app{display:flex;flex-direction:column;height:100%;padding-top:var(--safe-t)}
+#view{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:calc(60px + var(--safe-b) + 12px)}
+#nav{position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:#0a0f1e;border-top:1px solid var(--border);}
+#nav-inner{display:flex;align-items:center;height:60px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
+#nav-pad{height:var(--safe-b);background:#0a0f1e;}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer}
+.nav-icon{font-size:20px;line-height:1;transition:transform .2s}
+.nav-label{font-size:10px;color:var(--text2);font-weight:500;letter-spacing:.02em;transition:color .2s}
+.nav-item.active .nav-icon{transform:scale(1.15)}
+.nav-item.active .nav-label{color:var(--accent)}
+.page-header{padding:16px 20px 12px;position:sticky;top:0;background:rgba(10,15,30,0.96);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);z-index:10;border-bottom:1px solid var(--border)}
+.page-title{font-size:24px;font-weight:700;letter-spacing:-.02em}
+.page-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin:0 16px 10px}
+.card-sm{padding:11px 14px}
+.section-label{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:14px 20px 6px}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+.badge-blue{background:rgba(79,142,247,.18);color:var(--accent)}
+.badge-green{background:rgba(52,201,138,.18);color:var(--accent2)}
+.badge-amber{background:rgba(245,166,35,.18);color:var(--accent3)}
+.badge-red{background:rgba(224,90,90,.18);color:var(--accent4)}
+.check-btn{width:28px;height:28px;border-radius:50%;border:2px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .25s;flex-shrink:0}
+.check-btn.done{background:var(--accent2);border-color:var(--accent2)}
+.check-btn .ck{font-size:13px;opacity:0;transition:opacity .2s}
+.check-btn.done .ck{opacity:1}
+.ex-item{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--border)}
+.ex-item:last-child{border-bottom:none}
+.ex-num{width:26px;height:26px;border-radius:7px;background:var(--bg3);display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:700;color:var(--text2);flex-shrink:0;font-family:'DM Mono',monospace}
+.ex-info{flex:1;min-width:0}
+.ex-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ex-meta{font-size:11px;color:var(--text2);margin-top:2px}
+.ex-tip{font-size:11px;color:var(--text3);margin-top:2px;line-height:1.4;white-space:normal}
+.ex-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:8px;margin-top:3px;font-weight:600}
+.tag-new{background:rgba(224,90,90,.2);color:var(--accent4)}
+.tag-key{background:rgba(79,142,247,.2);color:var(--accent)}
+.tag-posture{background:rgba(245,166,35,.2);color:var(--accent3)}
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;
+  align-items:flex-end;backdrop-filter:blur(6px)}
+#modal-overlay.show{display:flex}
+#modal{background:var(--bg2);border-radius:24px 24px 0 0;width:100%;max-height:90vh;
+  overflow-y:auto;padding:0 0 calc(24px + var(--safe-b));animation:slideUp .3s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.modal-handle{width:40px;height:4px;background:var(--border2);border-radius:2px;margin:12px auto 16px}
+.modal-title{font-size:19px;font-weight:700;padding:0 20px 14px}
+.log-row{display:flex;flex-direction:column;gap:8px;padding:11px 20px;border-bottom:1px solid var(--border)}
+.log-label{font-size:13px;color:var(--text2);font-weight:500}
+.log-stars{display:flex;gap:8px}
+.star-btn{width:38px;height:38px;border-radius:11px;border:1px solid var(--border2);background:var(--bg3);
+  display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;transition:all .2s}
+.star-btn.sel{background:rgba(245,166,35,.2);border-color:var(--accent3)}
+.log-options{display:flex;flex-wrap:wrap;gap:7px}
+.opt-btn{padding:7px 13px;border-radius:20px;border:1px solid var(--border2);background:var(--bg3);
+  color:var(--text2);font-size:13px;cursor:pointer;transition:all .2s;font-family:'Noto Sans SC',sans-serif}
+.opt-btn.sel{background:rgba(79,142,247,.2);border-color:var(--accent);color:var(--accent)}
+.log-textarea{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:11px;
+  color:var(--text);padding:11px;font-size:14px;resize:none;font-family:'Noto Sans SC',sans-serif;outline:none}
+.log-textarea:focus{border-color:var(--accent)}
+.btn-primary{width:calc(100% - 40px);margin:14px 20px 0;padding:15px;background:var(--accent);
+  color:#fff;border:none;border-radius:var(--radius);font-size:15px;font-weight:700;cursor:pointer;
+  font-family:'Noto Sans SC',sans-serif;transition:opacity .2s}
+.btn-primary:active{opacity:.8}
+.video-container{border-radius:13px;overflow:hidden;background:#000;position:relative;padding-top:56.25%}
+.video-container iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:none}
+.speed-btn{font-size:12px;padding:3px 9px;border-radius:14px;border:1px solid var(--border2);
+  background:var(--bg3);color:var(--text2);cursor:pointer;transition:all .15s;font-family:'DM Mono',monospace}
+.speed-btn.speed-active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.ring-wrap{position:relative;display:inline-flex;align-items:center;justify-content:center}
+.ring-wrap svg{transform:rotate(-90deg)}
+.ring-center{position:absolute;text-align:center}
+.bar-wrap{display:flex;align-items:flex-end;gap:5px;height:72px;padding:0 2px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px}
+.bar{width:100%;border-radius:3px 3px 0 0;transition:height .5s ease;min-height:3px}
+.bar-label{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace}
+.metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:0 16px}
+.metric-tile{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:13px}
+.metric-val{font-size:26px;font-weight:700;font-family:'DM Mono',monospace;letter-spacing:-.03em}
+.metric-unit{font-size:12px;color:var(--text2);margin-left:2px}
+.metric-label{font-size:11px;color:var(--text3);margin-top:3px}
+.metric-trend{font-size:11px;margin-top:5px}
+.insight-item{display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--border)}
+.insight-item:last-child{border-bottom:none}
+.insight-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.insight-title{font-size:14px;font-weight:600;margin-bottom:2px}
+.insight-desc{font-size:12px;color:var(--text2);line-height:1.5}
+.date-arrow{width:34px;height:34px;border-radius:10px;background:var(--bg3);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;flex-shrink:0;transition:all .15s}
+.date-arrow:active{background:var(--accent);border-color:var(--accent)}
+.date-scroll{flex:1;overflow-x:auto;display:flex;gap:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:2px 0}
+.date-scroll::-webkit-scrollbar{display:none}
+.date-pill{flex-shrink:0;padding:7px 12px;border-radius:20px;border:1px solid var(--border2);
+  background:var(--bg3);cursor:pointer;transition:all .2s;text-align:center;min-width:54px}
+.date-pill.active{background:var(--accent);border-color:var(--accent)}
+.date-pill.today-mark{border-color:var(--accent2)}
+.date-pill-dot{width:5px;height:5px;border-radius:50%;background:var(--accent2);margin:2px auto 0}
+/* daily posture banner */
+.posture-banner{margin:10px 16px 0;background:linear-gradient(135deg,rgba(245,166,35,.12),rgba(224,90,90,.08));
+  border:1px solid rgba(245,166,35,.3);border-radius:var(--radius);padding:13px 14px}
+::-webkit-scrollbar{display:none}
+
+/* 日期切换动画 */
+.date-pill{transition:background .2s cubic-bezier(.4,0,.2,1),border-color .2s cubic-bezier(.4,0,.2,1);}
+.date-pill-day{font-size:11px;font-weight:600;color:var(--text2);transition:color .2s cubic-bezier(.4,0,.2,1);}
+.date-pill-num{font-size:15px;font-weight:700;color:var(--text);transition:color .2s cubic-bezier(.4,0,.2,1);}
+.date-pill.active .date-pill-day{color:#fff;}
+.date-pill.active .date-pill-num{color:#fff;}
+.date-pill.today-mark .date-pill-day{color:var(--accent2);}
+@keyframes planFadeUp{
+  from{opacity:0;transform:translateY(8px);}
+  to{opacity:1;transform:translateY(0);}
+}
+@keyframes headerFade{
+  from{opacity:0;}
+  to{opacity:1;}
+}
+.plan-body-anim{animation:planFadeUp .22s cubic-bezier(.4,0,.2,1) both;}
+.plan-header-anim{animation:headerFade .18s cubic-bezier(.4,0,.2,1) both;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view"></div>
+  <nav id="nav">
+    <div id="nav-inner">
+      <div class="nav-item active" onclick="showPage('plan')" id="nav-plan"><div class="nav-icon">📋</div><div class="nav-label">今日计划</div></div>
+      <div class="nav-item" onclick="showPage('schedule')" id="nav-schedule"><div class="nav-icon">📅</div><div class="nav-label">训练表</div></div>
+      <div class="nav-item" onclick="showPage('log')" id="nav-log"><div class="nav-icon">✏️</div><div class="nav-label">打卡</div></div>
+      <div class="nav-item" onclick="showPage('stats')" id="nav-stats"><div class="nav-icon">📊</div><div class="nav-label">分析</div></div>
+    </div>
+    <div id="nav-pad"></div>
+  </nav>
+</div>
+<div id="modal-overlay" onclick="closeModalOutside(event)"><div id="modal"></div></div>
+
+<script>
+// ══════════════════════════════════════════
+// 视频资源：已确认BV → 嵌入；其他 → B站搜索
+// ══════════════════════════════════════════
+const VIDEOS = {
+  lat_pulldown:{bvid:'BV1DK4y197ci',up:'Gandy__',verified:true},
+  squat:       {bvid:'BV1V34y187Ls',up:'UP健身', verified:true},
+  deadlift:    {bvid:'BV1vY411u78j',up:'UP健身', verified:true},
+  rdl:         {bvid:'BV1oM411y7Ug',up:'UP健身', verified:true},
+  cable_row:   {bvid:'BV1d14y1h7cK',up:'我是Tia',verified:true},
+  db_row:      {bvid:'BV1Ra41117BY',up:'UP健身', verified:true},
+  pullup:      {bvid:'BV17h4y1k7Nn',up:'UP健身', verified:true},
+};
+function embedUrl(k){const v=VIDEOS[k];return v?'https://player.bilibili.com/player.html?bvid='+v.bvid+'&page=1&high_quality=1&danmaku=0&as_wide=1&autoplay=1':null;}
+function searchUrl(q){return 'https://search.bilibili.com/all?keyword='+encodeURIComponent(q)+'&order=click';}
+
+// ══════════════════════════════════════════
+// 训练数据（修订版 · 含全部体态矫正调整）
+// ══════════════════════════════════════════
+const PLAN = {
+  // 周一 — 上肢力量（体态优先，面拉第一）
+  1:{name:"上肢力量日",emoji:"💪",color:"#4f8ef7",note:"拉推比2:1 · 肩推暂停4周 · 面拉第一主项",
+    exercises:[
+      {name:"弹力带面拉",sets:"4组",reps:"15次",weight:"轻-中弹力带",tip:"今天第一个做。拉至耳侧，感受后三角和外旋肌收缩，不要耸肩",q:"弹力带face pull后束训练教学",tag:"key",tagLabel:"首位主项"},
+      {name:"高位下拉",sets:"4组",reps:"8-10次",weight:"35-40kg",tip:"宽握下拉至锁骨，顶峰收缩1秒",video:"lat_pulldown",q:"高位下拉标准教学"},
+      {name:"坐姿绳索划船",sets:"3组",reps:"10-12次",weight:"30-35kg",tip:"肘贴体侧，肩胛下沉后收，不要耸肩借力",video:"cable_row",q:"坐姿绳索划船教学"},
+      {name:"单臂哑铃划船",sets:"3组",reps:"12次/侧",weight:"12-16kg",tip:"躯干平行地面，肘高过背，感受背阔而非手臂",video:"db_row",q:"单臂哑铃划船标准动作"},
+      {name:"辅助引体向上（离心）",sets:"3组",reps:"5-6次",weight:"重弹力带辅助",tip:"4-6秒慢速放下是关键，比拉上去更重要",video:"pullup",q:"引体向上零基础离心训练"},
+      {name:"侧卧哑铃外旋",sets:"3组",reps:"15次/侧",weight:"徒手→1-2kg",tip:"上臂夹紧体侧，肘弯90°，前臂向上旋转到极限停1秒。直接针对肱骨前移",q:"侧卧哑铃外旋 肩袖训练",tag:"new",tagLabel:"新增·体态"},
+    ]},
+
+  // 周二 — Zone 2 有氧
+  2:{name:"Zone 2 有氧",emoji:"🏃",color:"#34c98a",note:"心率115-128bpm · 能正常说话为准",
+    exercises:[
+      {name:"热身步行",sets:"—",reps:"5分钟",weight:"心率<110",tip:"逐步预热关节"},
+      {name:"Zone 2 慢跑",sets:"—",reps:"30-40分钟",weight:"心率115-128bpm",tip:"配速约7'30''-8'00''，停止原来140bpm的舒适区慢跑",q:"Zone2有氧跑步低心率训练"},
+      {name:"步频专练（中段）",sets:"—",reps:"10分钟",weight:"节拍器176bpm",tip:"小步幅，脚落在重心正下方，不追求速度",q:"跑步步频训练提高节拍器"},
+      {name:"拉伸收尾",sets:"—",reps:"5分钟",weight:"—",tip:"髋屈肌+小腿+前臂屈肌",q:"跑后拉伸髋屈肌小腿放松"},
+    ]},
+
+  // 周三 — 下肢力量（已调整顺序和总量）
+  3:{name:"下肢力量日",emoji:"🦵",color:"#4f8ef7",note:"臀肌主导 · 臀推提前 · 总量已调整",
+    exercises:[
+      {name:"臀肌激活热身",sets:"各2组",reps:"20次",weight:"轻弹力带",tip:"蚌式+侧卧外展，这5分钟决定今天训练质量，不要跳过",q:"臀肌激活热身蚌式开合侧卧外展"},
+      {name:"单腿臀推",sets:"3组",reps:"10次/侧",weight:"徒手→哑铃",tip:"【提前做】趁未疲劳时做。顶部夹臀2秒。感受不到臀部发力先回去激活",q:"单腿臀推教学标准动作",tag:"key",tagLabel:"顺序调整"},
+      {name:"杠铃深蹲",sets:"3组",reps:"8-10次",weight:"当前适应重量",tip:"膝对脚尖不内扣，每周加2.5kg。空杆和10-20kg完全正确",video:"squat",q:"杠铃深蹲标准教学"},
+      {name:"罗马尼亚硬拉",sets:"3组",reps:"10次",weight:"15-20kg",tip:"感受腘绳拉伸，不弓腰，臀部推进启动",video:"rdl",q:"罗马尼亚硬拉标准教学"},
+      {name:"弹力带侧向走",sets:"3组",reps:"15步/侧",weight:"中等弹力带",tip:"半蹲姿，每次臀腿日必做，专门改善O型腿",q:"弹力带侧向走臀中肌训练"},
+      {name:"保加利亚分腿蹲（慢速）",sets:"2组",reps:"8次/侧",weight:"各8-10kg",tip:"放在最后做，下降3秒，已有足够刺激，2组即可",q:"保加利亚分腿蹲教学慢速"},
+    ]},
+
+  // 周四 — 体态松解日（含不对称矫正）
+  4:{name:"体态松解日",emoji:"🧘",color:"#f5a623",note:"每日体态矫正 · 不对称处理高低肩 · 约20分钟",
+    exercises:[
+      {name:"胸小肌PNF拉伸（门框）",sets:"3次",reps:"45秒+3秒推撑",weight:"徒手",tip:"拉到终点后主动推撑门框3秒再深入，效果远优于静态拉伸",q:"胸小肌拉伸门框圆肩矫正",tag:"posture",tagLabel:"肱骨前移"},
+      {name:"肩关节后囊拉伸",sets:"—",reps:"45秒/侧",weight:"徒手",tip:"手臂水平穿过胸前，另一手扣肘往身体拉，感受肩后侧深层。做完肩膀立刻往后退",q:"肩关节后囊拉伸肩膀内旋",tag:"new",tagLabel:"新增·体态"},
+      {name:"侧卧哑铃外旋",sets:"3组",reps:"15次/侧",weight:"1-2kg",tip:"上臂夹紧体侧，肘90°，前臂向上旋转极限停1秒",q:"侧卧哑铃外旋肩袖训练",tag:"posture",tagLabel:"肱骨前移"},
+      {name:"俯卧Y形举",sets:"3组",reps:"12次",weight:"徒手",tip:"双臂斜向上成Y字，大拇指朝上，举离地面停2秒，感受肩胛间收缩。不要耸肩",q:"俯卧Y形举下斜方肌训练",tag:"new",tagLabel:"新增·体态"},
+      {name:"左侧上斜方肌拉伸【仅左侧】",sets:"3次",reps:"45秒",weight:"徒手",tip:"头向右侧倾，右手轻压头顶。只做左侧，专门矫正左高右低",q:"上斜方肌拉伸高低肩矫正",tag:"posture",tagLabel:"高低肩·仅左"},
+      {name:"右侧肩胛下沉激活【仅右侧】",sets:"3组",reps:"12次",weight:"轻弹力带",tip:"右手握弹力带向下拉，保持肩胛下沉5秒。只做右侧，激活被抑制的右下斜方肌",q:"肩胛下沉激活训练",tag:"posture",tagLabel:"高低肩·仅右"},
+      {name:"鸽子式拉伸",sets:"—",reps:"60秒/侧",weight:"徒手",tip:"梨状肌松解，O型腿和画圈步态的根源，每天必做",q:"鸽子式拉伸梨状肌松解"},
+      {name:"跪姿髂腰肌拉伸",sets:"—",reps:"45秒/侧",weight:"徒手",tip:"骨盆轻微后倾，感受大腿根部拉伸",q:"髂腰肌拉伸跪姿弓步"},
+      {name:"墙壁天使",sets:"3组",reps:"10次",weight:"徒手",tip:"后脑/背/臀全贴墙，重建肩胛正确运动轨迹"},
+      {name:"泡沫轴臀外侧+左肩颈",sets:"—",reps:"各60秒",weight:"泡沫轴",tip:"臀外侧松解+左侧肩颈重点松解，痛点停留20-30秒"},
+    ]},
+
+  // 周五 — 全身力量
+  5:{name:"全身力量日",emoji:"🏋️",color:"#4f8ef7",note:"硬拉优先 · 引体第二次/周",
+    exercises:[
+      {name:"传统硬拉",sets:"4组",reps:"6-8次",weight:"起始50kg",tip:"脊柱中立，臀部推进感。起始臀往后坐，提起时臀往前推",video:"deadlift",q:"传统硬拉标准教学",tag:"key",tagLabel:"核心主项"},
+      {name:"哑铃俯身划船",sets:"3组",reps:"12次/侧",weight:"14-16kg/侧",tip:"与窄距俯卧撑做超级组，中间不休息",video:"db_row",q:"哑铃俯身划船教学"},
+      {name:"窄距俯卧撑（进阶）",sets:"3组",reps:"力竭~15-18次",weight:"徒手",tip:"超级组，突出三头和核心稳定",q:"窄距俯卧撑教学三头肌"},
+      {name:"45°背伸",sets:"3组",reps:"15次",weight:"徒手/抱哑铃",tip:"顶部夹紧臀部，连接上下链体态",q:"45度背伸山羊挺身竖脊肌"},
+      {name:"Pallof Press 抗旋转",sets:"3组",reps:"12次/侧",weight:"弹力带/轻绳索",tip:"深层核心激活，比平板支撑更有功能性",q:"Pallof Press核心抗旋转训练"},
+      {name:"辅助引体向上（离心）",sets:"3组",reps:"5次",weight:"椅子辅助",tip:"4秒慢速下降，引体每周两次（周一+周五）",video:"pullup",q:"引体向上零基础离心训练"},
+    ]},
+
+  // 周六 — HIIT
+  6:{name:"HIIT 有氧",emoji:"⚡",color:"#e05a5a",note:"冲刺30s+慢走90s · 8-10组",
+    exercises:[
+      {name:"热身慢跑",sets:"—",reps:"5分钟",weight:"心率<120",tip:"逐步预热",q:"跑步热身教学"},
+      {name:"冲刺间歇",sets:"8-10组",reps:"冲刺30s+慢走90s",weight:"Zone4-5 165+bpm",tip:"第8周起改为冲刺20s+慢走60s。跑步机/跳绳/户外均可",q:"HIIT冲刺间歇跑教学"},
+      {name:"拉伸放松",sets:"—",reps:"5分钟",weight:"—",tip:"小腿+大腿前侧+前臂屈肌",q:"运动后拉伸小腿大腿前侧"},
+    ]},
+
+  // 周日 — 休息
+  7:{name:"完全休息",emoji:"😴",color:"#4a5a7a",note:"充分恢复，不做训练",exercises:[]},
+};
+
+// 每日必做体态矫正（15分钟，每天）
+const DAILY_POSTURE = [
+  {name:"胸小肌PNF拉伸",reps:"45秒/侧+推撑3秒",q:"胸小肌拉伸门框圆肩矫正"},
+  {name:"肩关节后囊拉伸",reps:"45秒/侧",q:"肩关节后囊拉伸"},
+  {name:"侧卧哑铃外旋",reps:"3组×15次/侧",q:"侧卧哑铃外旋肩袖训练"},
+  {name:"俯卧Y形举",reps:"3组×12次",q:"俯卧Y形举下斜方肌训练"},
+  {name:"左上斜方肌拉伸（仅左侧）",reps:"45秒×3次",q:"上斜方肌拉伸高低肩矫正"},
+  {name:"右侧肩胛下沉激活（仅右侧）",reps:"3组×12次",q:"肩胛下沉激活训练"},
+  {name:"鸽子式拉伸",reps:"60秒/侧",q:"鸽子式拉伸梨状肌松解"},
+];
+
+const PHASES = [
+  {label:"第1-2周",name:"适应启动",color:"#f5a623"},
+  {label:"第3-4周",name:"力量启动",color:"#4f8ef7"},
+  {label:"第5-6周",name:"全面加速",color:"#4f8ef7"},
+  {label:"第7周", name:"减负恢复",color:"#f5a623"},
+  {label:"第8-10周",name:"强化突破",color:"#4f8ef7"},
+  {label:"第11-12周",name:"收尾塑形",color:"#34c98a"},
+];
+
+// ══════════════════════════
+// STATE
+// ══════════════════════════
+// APP_VERSION：每次训练计划内容有变化时递增，用于提示用户
+const APP_PLAN_VERSION = 2; // 修订版·含体态矫正调整
+
+let S = JSON.parse(localStorage.getItem('fit_app')||'null') || {
+  startDate: todayStr(),
+  logs: {},
+  weights: [],
+  planVersion: APP_PLAN_VERSION,
+  planSwitchDates: {} // {版本号: 切换日期} 记录每次计划变更的时间点
+};
+
+// 检测计划版本变化，自动记录切换日期而不丢失数据
+if(S.planVersion !== APP_PLAN_VERSION){
+  if(!S.planSwitchDates) S.planSwitchDates = {};
+  S.planSwitchDates[APP_PLAN_VERSION] = todayStr();
+  S.planVersion = APP_PLAN_VERSION;
+  localStorage.setItem('fit_app', JSON.stringify(S));
+}
+let page='plan', viewDate=todayStr(), logDate=null;
+
+function save(){localStorage.setItem('fit_app',JSON.stringify(S));}
+function todayStr(){return new Date().toISOString().split('T')[0];}
+function weekday(ds){const j=new Date(ds+'T12:00:00').getDay();return j===0?7:j;}
+function weekNum(ds){
+  const diff=Math.floor((new Date(ds+'T12:00:00')-new Date(S.startDate+'T12:00:00'))/(864e5));
+  return Math.max(1,Math.floor(diff/7)+1);
+}
+
+// 根据日期获取当天计划，处理第7周减负逻辑
+function getPlanDay(ds){
+  const wd=weekday(ds);
+  const wn=weekNum(ds);
+  const base=PLAN[wd];
+  if(!base) return base;
+
+  // 第7周减负：降低训练量，更新备注
+  if(wn===7){
+    const reduced = Object.assign({},base);
+    reduced.note = base.note + ' · ⚠️ 第7周减负，训练量降低40%';
+    reduced.exercises = base.exercises.map(ex=>{
+      if(!ex.sets || ex.sets==='—') return ex;
+      const newSets = ex.sets.replace(/4组/,'2组').replace(/3组/,'2组');
+      return Object.assign({},ex,{sets:newSets});
+    });
+    return reduced;
+  }
+
+  // 超过12周后进入维持阶段
+  if(wn>12){
+    return Object.assign({},base,{note:base.note+' · 维持阶段'});
+  }
+
+  return base;
+}
+
+// 判断某个历史日期是否在当前计划版本切换之前
+// 切换前的数据只显示"已完成X项"，不硬对应新计划的动作名
+function isBeforePlanSwitch(ds){
+  if(!S.planSwitchDates) return false;
+  const switchDate = S.planSwitchDates[APP_PLAN_VERSION];
+  if(!switchDate) return false;
+  return ds < switchDate;
+}
+function getLog(d){return S.logs[d]||{completed:[],feeling:0,energy:0,issues:[],notes:'',bodyweight:null};}
+function dateLabel(ds){
+  const d=new Date(ds+'T12:00:00');
+  return `${d.getMonth()+1}/${d.getDate()} 周${'日一二三四五六'[d.getDay()]}`;
+}
+function isToday(ds){return ds===todayStr();}
+
+// ══════════════════════════
+// ROUTER
+// ══════════════════════════
+function showPage(p){
+  page=p;
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  document.getElementById('nav-'+p).classList.add('active');
+  const v=document.getElementById('view');
+  if(p==='plan') v.innerHTML=renderPlan();
+  else if(p==='schedule') v.innerHTML=renderSchedule();
+  else if(p==='log') v.innerHTML=renderLog();
+  else v.innerHTML=renderStats();
+}
+
+// ══════════════════════════
+// PAGE: PLAN
+// ══════════════════════════
+function renderPlan(){
+  return `<div id="plan-view">${renderPlanHeader()}${renderDateStrip()}${renderPlanBody()}</div>`;
+}
+
+function renderPlanHeader(){
+  const wn=weekNum(viewDate);
+  const pi=wn<=2?0:wn<=4?1:wn<=6?2:wn===7?3:wn<=10?4:5;
+  const phase=PHASES[Math.min(pi,5)];
+  const tod=isToday(viewDate);
+  return `<div class="page-header plan-header-anim" id="plan-header">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div class="page-title">${tod?'今日计划':'查看计划'}</div>
+        <div class="page-sub">${dateLabel(viewDate)} · 第${wn}周 <span class="badge badge-amber" style="margin-left:4px">${phase.name}</span></div>
+      </div>
+      ${!tod?`<div onclick="goToday()" style="background:rgba(79,142,247,.2);border:1px solid var(--accent);border-radius:20px;padding:5px 12px;font-size:12px;color:var(--accent);cursor:pointer">回到今天</div>`:''}
+    </div>
+  </div>`;
+}
+
+function renderDateStrip(){
+  // 以开始日期为锚点，渲染 -14 到 +98 天（覆盖14周），一次建好不再重建
+  let html=`<div style="display:flex;align-items:center;padding:10px 8px 0;gap:4px" id="date-strip-wrap">
+    <div class="date-arrow" onclick="shiftDate(-1)">‹</div>
+    <div class="date-scroll" id="date-strip">`;
+  const anchor=new Date(S.startDate+'T12:00:00');
+  for(let i=-14;i<=98;i++){
+    const d=new Date(anchor);d.setDate(d.getDate()+i);
+    const ds=d.toISOString().split('T')[0];
+    const wdN=weekday(ds);
+    const lg=getLog(ds);
+    const hasDone=lg.completed&&lg.completed.length>0;
+    const active=ds===viewDate, isTod=ds===todayStr();
+    html+=`<div class="date-pill ${active?'active':''} ${isTod&&!active?'today-mark':''}" id="dp-${ds}" onclick="setViewDate('${ds}')">
+      <div class="date-pill-day">${'一二三四五六日'[wdN-1]}</div>
+      <div class="date-pill-num">${d.getDate()}</div>
+      ${hasDone&&!active?'<div class="date-pill-dot"></div>':'<div style="height:7px"></div>'}
+    </div>`;
+  }
+  html+=`</div><div class="date-arrow" onclick="shiftDate(1)">›</div></div>`;
+  return html;
+}
+
+// 只更新日期条的激活状态，不重建DOM
+function updateDateStripActive(oldDs, newDs){
+  const oldPill=document.getElementById('dp-'+oldDs);
+  const newPill=document.getElementById('dp-'+newDs);
+  // 只操作 class，颜色完全由 CSS transition 控制，不碰任何 style
+  if(oldPill){
+    oldPill.classList.remove('active');
+    if(oldDs===todayStr()) oldPill.classList.add('today-mark');
+  }
+  if(newPill){
+    newPill.classList.remove('today-mark');
+    newPill.classList.add('active');
+    newPill.scrollIntoView({behavior:'instant',block:'nearest',inline:'center'});
+  }
+}
+
+function renderPlanBody(){
+  const wn=weekNum(viewDate), wd=weekday(viewDate);
+  const pi=wn<=2?0:wn<=4?1:wn<=6?2:wn===7?3:wn<=10?4:5;
+  const day=getPlanDay(viewDate), log=getLog(viewDate);
+  const total=day.exercises.length, done=log.completed.length;
+  const pct=total>0?Math.round(done/total*100):0;
+
+  let html='';
+  // 每日体态提醒
+  html+=`<div id="plan-body" class="plan-body-anim"><div class="posture-banner">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent3)">🎯 每日必做体态矫正 · 15分钟</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:3px">肱骨前移 + 高低肩 · 每天执行比训练日更重要</div>
+      </div>
+      <div onclick="showPostureModal()" style="font-size:12px;color:var(--accent);border:1px solid var(--accent);border-radius:14px;padding:4px 10px;cursor:pointer">查看</div>
+    </div>
+  </div>`;
+
+  // 当天主卡片
+  html+=`<div style="padding:10px 16px 0">
+    <div class="card" style="border-color:${day.color}33;background:linear-gradient(135deg,${day.color}0d,var(--card));margin:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${total>0?'12px':'0'}">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:18px;font-weight:700">${day.emoji} ${day.name}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:3px">${day.note}</div>
+        </div>
+        ${total>0?`<div class="ring-wrap" style="margin-left:12px">
+          <svg width="58" height="58" viewBox="0 0 58 58">
+            <circle cx="29" cy="29" r="23" fill="none" stroke="var(--bg3)" stroke-width="4.5"/>
+            <circle cx="29" cy="29" r="23" fill="none" stroke="${day.color}" stroke-width="4.5"
+              stroke-dasharray="${2*Math.PI*23}" stroke-dashoffset="${2*Math.PI*23*(1-pct/100)}"
+              stroke-linecap="round" style="transition:stroke-dashoffset .5s ease"/>
+          </svg>
+          <div class="ring-center">
+            <div style="font-size:14px;font-weight:700;font-family:'DM Mono',monospace">${pct}%</div>
+            <div style="font-size:9px;color:var(--text3)">${done}/${total}</div>
+          </div>
+        </div>`:'<div style="font-size:36px">😴</div>'}
+      </div>
+      ${total>0?`<div style="display:flex;gap:7px">
+        <button class="opt-btn ${pct===100?'sel':''}" onclick="quickDone('${viewDate}')" style="flex:1;text-align:center;padding:9px;font-size:13px">${pct===100?'✅ 已完成':'⚡ 一键完成'}</button>
+        <button class="opt-btn" onclick="openLog('${viewDate}')" style="padding:9px 13px;font-size:13px">📝 打卡</button>
+      </div>`:''}
+    </div>
+  </div>`;
+
+  if(total>0){
+    html+=`<div class="section-label">训练动作</div><div class="card">`;
+    day.exercises.forEach((ex,i)=>{
+      const done2=log.completed.includes(i);
+      const tagHtml=ex.tag?`<span class="ex-tag tag-${ex.tag}">${ex.tagLabel}</span>`:'';
+      html+=`<div class="ex-item" onclick="showEx(${wd},${i})">
+        <div class="ex-num">${i+1}</div>
+        <div class="ex-info">
+          <div class="ex-name" style="${done2?'text-decoration:line-through;color:var(--text3)':''}">${ex.name}</div>
+          <div class="ex-meta">${ex.sets} · ${ex.reps} · ${ex.weight}</div>
+          <div style="margin-top:2px">${tagHtml}</div>
+        </div>
+        <div class="check-btn ${done2?'done':''}" onclick="toggleEx(event,'${viewDate}',${i})"><span class="ck">✓</span></div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+
+  const tips=[
+    '🔰 适应期：感受肌肉发力比追求重量更重要，体态矫正动作每天坚持',
+    '🔥 力量期：每周渐进加重2.5kg，记录每次重量，面拉和侧卧外旋不要跳过',
+    '🔥 强化期：引体向上次数是本阶段关键进度指标',
+    '♻️ 减负周：降低40%训练量，肌肉在这周真正生长',
+    '💪 突破期：引体向上应能完成2-3个，体态改善开始明显',
+    '🏆 收尾期：引体向上5+个是最终里程碑，体态改善会非常显著',
+  ];
+  html+=`<div class="section-label">本周提示</div>
+    <div class="card card-sm" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--text2);line-height:1.7">${tips[Math.min(pi,5)]}</div>
+    </div></div>`;
+  return html;
+}
+
+function setViewDate(ds){
+  const oldDs=viewDate;
+  viewDate=ds;
+  const strip=document.getElementById('date-strip');
+  if(strip && document.getElementById('dp-'+ds)){
+    // 日期条已存在且包含目标日期：只改 class，不重建任何 DOM
+    updateDateStripActive(oldDs, ds);
+    // 更新标题行（带淡入动画）
+    const hdr=document.getElementById('plan-header');
+    if(hdr) hdr.outerHTML=renderPlanHeader();
+    // 更新训练内容（带淡入+上移动画）
+    const body=document.getElementById('plan-body');
+    if(body){
+      body.outerHTML=renderPlanBody();
+      // 强制重播动画：移除再添加 class
+      const newBody=document.getElementById('plan-body');
+      if(newBody){
+        newBody.classList.remove('plan-body-anim');
+        void newBody.offsetWidth; // 触发 reflow
+        newBody.classList.add('plan-body-anim');
+      }
+    }
+  } else if(document.getElementById('plan-view')){
+    // 目标日期超出已渲染范围（理论上不会，因为渲染了112天）：重建整页
+    document.getElementById('plan-view').innerHTML = renderPlanHeader()+renderDateStrip()+renderPlanBody();
+    requestAnimationFrame(()=>{
+      const el=document.getElementById('dp-'+ds);
+      if(el) el.scrollIntoView({behavior:'instant',block:'nearest',inline:'center'});
+    });
+  } else {
+    showPage('plan');
+  }
+}
+function shiftDate(delta){
+  const dt=new Date(viewDate+'T12:00:00');
+  dt.setDate(dt.getDate()+delta);
+  setViewDate(dt.toISOString().split('T')[0]);
+}
+function goToday(){
+  setViewDate(todayStr());
+}
+
+// ══════════════════════════
+// PAGE: SCHEDULE
+// ══════════════════════════
+function renderSchedule(){
+  const wn=weekNum(todayStr());
+  let html=`<div class="page-header"><div class="page-title">训练计划表</div><div class="page-sub">12周完整方案 · 修订版 · 当前第${wn}周</div></div>`;
+
+  html+=`<div class="section-label">阶段进度</div>`;
+  const sw=[1,3,5,7,8,11],ew=[2,4,6,7,10,12];
+  PHASES.forEach((ph,i)=>{
+    const done2=wn>ew[i],active=!done2&&wn>=sw[i];
+    html+=`<div class="card card-sm" style="margin-bottom:8px;${active?'border-color:'+ph.color+';':done2?'opacity:.55':''}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><span style="color:${ph.color};font-weight:700;font-size:12px">${ph.label}</span>
+        <span style="font-size:14px;font-weight:600;margin-left:8px">${ph.name}</span></div>
+        ${done2?'<span>✅</span>':active?'<span class="badge badge-blue">进行中</span>':'<span style="font-size:12px;color:var(--text3)">待开始</span>'}
+      </div>
+    </div>`;
+  });
+
+  html+=`<div class="section-label">每周安排</div>`;
+  const dnames=['','周一','周二','周三','周四','周五','周六','周日'];
+  [1,2,3,4,5,6,7].forEach(d=>{
+    const day=PLAN[d];
+    html+=`<div class="card card-sm" style="margin-bottom:7px" onclick="showDayDetail(${d})">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:40px;height:40px;border-radius:11px;background:${day.color}22;border:1px solid ${day.color}44;
+          display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0">${day.emoji}</div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:5px">
+            <span style="font-size:12px;color:var(--text3)">${dnames[d]}</span>
+            <span style="font-size:14px;font-weight:600">${day.name}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">${day.exercises.length>0?day.exercises.length+'个动作 · 点击查看':'完全休息'}</div>
+        </div>
+        <div style="font-size:18px;color:var(--text3)">›</div>
+      </div>
+    </div>`;
+  });
+
+  html+=`<div class="section-label">体态改善里程碑</div><div class="card" style="margin-bottom:20px">`;
+  [{w:'第2-3周',t:'走路开始有力，Zone 2 不再觉得太慢',ic:'🚶'},
+   {w:'第4周',t:'肩膀放松时手背开始朝向大腿外侧（肱骨前移改善信号）',ic:'💪'},
+   {w:'第4-6周',t:'高低肩高度差明显缩小，画圈步态减少',ic:'👣'},
+   {w:'第6周',t:'引体向上独立完成1-2个',ic:'🔝'},
+   {w:'第8周',t:'体重约63-64kg，引体3-4个，胸肌视觉差异改善',ic:'⚖️'},
+   {w:'第12周',t:'引体5+个，体重61-62kg，体态改善非常显著',ic:'🏆'},
+  ].forEach(m=>{
+    html+=`<div class="insight-item">
+      <div class="insight-icon" style="background:var(--bg3)">${m.ic}</div>
+      <div><div class="insight-title" style="color:var(--accent3)">${m.w}</div><div class="insight-desc">${m.t}</div></div>
+    </div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+
+// ══════════════════════════
+// PAGE: LOG
+// ══════════════════════════
+function renderLog(){
+  const tod=todayStr(), wd=weekday(tod), day=getPlanDay(tod), log=getLog(tod);
+  let html=`<div class="page-header"><div class="page-title">打卡记录</div><div class="page-sub">今天 · ${dateLabel(tod)}</div></div>`;
+  html+=`<div class="section-label">今日动作</div><div class="card">`;
+  if(day.exercises.length>0){
+    day.exercises.forEach((ex,i)=>{
+      const done2=log.completed.includes(i);
+      html+=`<div class="ex-item">
+        <div class="ex-info"><div class="ex-name" style="${done2?'text-decoration:line-through;color:var(--text3)':''}">${ex.name}</div><div class="ex-meta">${ex.sets} · ${ex.reps}</div></div>
+        <div class="check-btn ${done2?'done':''}" onclick="toggleEx(event,'${tod}',${i});showPage('log')"><span class="ck">✓</span></div>
+      </div>`;
+    });
+  } else {
+    html+=`<div style="text-align:center;color:var(--text3);padding:16px;font-size:14px">今天是休息日 😴</div>`;
+  }
+  html+=`<button class="opt-btn" style="width:100%;text-align:center;margin-top:10px;padding:11px" onclick="openLog('${tod}')">📊 记录感受 · 体重 · 备注</button></div>`;
+
+  html+=`<div class="section-label">最近记录</div>`;
+  const recent=Object.keys(S.logs).sort().reverse().slice(0,10);
+  if(!recent.length){
+    html+=`<div class="card card-sm" style="text-align:center;color:var(--text3);padding:20px">暂无记录，完成训练后打卡吧</div>`;
+  } else {
+    recent.forEach(date=>{
+      const l=S.logs[date];
+      const cnt=l.completed?l.completed.length:0;
+      const fe=['','😫','😐','🙂','😊','🔥'][l.feeling||0];
+      const beforeSwitch = isBeforePlanSwitch(date);
+      html+=`<div class="card card-sm" style="margin-bottom:7px" onclick="openLog('${date}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:13px;font-weight:600">${dateLabel(date)}</span>
+              ${beforeSwitch?'<span style="font-size:10px;color:var(--text3);background:var(--bg3);padding:1px 6px;border-radius:8px">旧计划</span>':''}
+            </div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">完成${cnt}项 ${l.bodyweight?'· '+l.bodyweight+'kg':''} ${fe}</div>
+            ${l.notes?`<div style="font-size:11px;color:var(--text3);margin-top:2px">"${l.notes.slice(0,28)}${l.notes.length>28?'…':''}"</div>`:''}
+          </div>
+          <div style="font-size:20px">${cnt>0?'✅':'📝'}</div>
+        </div>
+      </div>`;
+    });
+  }
+  html+=`<div style="height:16px"></div>`;
+  return html;
+}
+
+// ══════════════════════════
+// PAGE: STATS
+// ══════════════════════════
+function renderStats(){
+  const wn=weekNum(todayStr());
+  const allD=Object.keys(S.logs).sort();
+  const total=allD.length;
+  const comp=allD.filter(d=>S.logs[d].completed&&S.logs[d].completed.length>0).length;
+  const rate=total>0?Math.round(comp/total*100):0;
+  const avgF=total>0?(allD.reduce((s,d)=>s+(S.logs[d].feeling||0),0)/total).toFixed(1):'-';
+
+  const last7=[];
+  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=d.toISOString().split('T')[0];
+    const t=getPlanDay(ds).exercises.length,l=S.logs[ds],dn=l&&l.completed?l.completed.length:0;
+    last7.push({ds,dn,t,pct:t>0?dn/t:0});}
+
+  let html=`<div class="page-header"><div class="page-title">数据分析</div><div class="page-sub">第${wn}周 · 智能进度追踪</div></div>`;
+  html+=`<div class="section-label">核心数据</div><div class="metric-grid">
+    <div class="metric-tile"><div class="metric-val">${rate}<span class="metric-unit">%</span></div><div class="metric-label">整体完成率</div>
+      <div class="metric-trend" style="color:${rate>=80?'var(--accent2)':rate>=60?'var(--accent3)':'var(--accent4)'}">${rate>=80?'🔥 优秀':rate>=60?'👍 良好':'💪 继续'}</div></div>
+    <div class="metric-tile"><div class="metric-val">${comp}<span class="metric-unit">天</span></div><div class="metric-label">已打卡天数</div><div class="metric-trend" style="color:var(--text3)">共记录${total}天</div></div>
+    <div class="metric-tile"><div class="metric-val">${Math.min(wn,12)}<span class="metric-unit">/12</span></div><div class="metric-label">当前周次</div><div class="metric-trend" style="color:var(--accent)">进度${Math.round(Math.min(wn,12)/12*100)}%</div></div>
+    <div class="metric-tile"><div class="metric-val">${avgF}<span class="metric-unit">/5</span></div><div class="metric-label">平均状态评分</div><div class="metric-trend" style="color:var(--text3)">训练感受</div></div>
+  </div>`;
+
+  html+=`<div class="section-label">最近7天完成</div><div class="card"><div class="bar-wrap">`;
+  last7.forEach(d=>{
+    const h=Math.round(d.pct*58);const c=d.pct===1?'var(--accent2)':d.pct>0?'var(--accent)':'var(--bg3)';
+    const tod2=d.ds===todayStr();
+    html+=`<div class="bar-col"><div class="bar" style="height:${Math.max(h,3)}px;background:${c};opacity:${tod2?1:.75}"></div>
+      <div class="bar-label" style="${tod2?'color:var(--accent)':''}">${'一二三四五六日'[weekday(d.ds)-1]}</div></div>`;
+  });
+  html+=`</div></div>`;
+
+  html+=`<div class="section-label">智能分析</div><div class="card">`;
+  genInsights(wn,rate,S.logs,allD).forEach(ins=>{
+    html+=`<div class="insight-item"><div class="insight-icon" style="background:${ins.bg}">${ins.icon}</div>
+      <div><div class="insight-title">${ins.title}</div><div class="insight-desc">${ins.desc}</div></div></div>`;
+  });
+  html+=`</div>`;
+
+  html+=`<div class="section-label">体重趋势</div><div class="card" style="margin-bottom:8px">`;
+  if(S.weights.length>0){
+    const last=S.weights[S.weights.length-1],first=S.weights[0];
+    const diff=(last.kg-first.kg).toFixed(1);
+    html+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div><div style="font-size:26px;font-weight:700;font-family:'DM Mono',monospace">${last.kg}<span style="font-size:13px;color:var(--text2);margin-left:2px">kg</span></div>
+      <div style="font-size:11px;color:var(--text3)">最新 · ${last.date}</div></div>
+      <div style="text-align:right"><div style="font-size:19px;font-weight:700;color:${diff<=0?'var(--accent2)':'var(--accent4)'}">${diff<=0?diff:'+'+diff} kg</div>
+      <div style="font-size:11px;color:var(--text3)">较起始</div></div></div>`;
+    if(S.weights.length>1){
+      const wts=S.weights.slice(-8);const mn=Math.min(...wts.map(w=>w.kg)),mx=Math.max(...wts.map(w=>w.kg));const rng=mx-mn||0.5;
+      html+=`<div class="bar-wrap" style="height:56px">`;
+      wts.forEach(w=>{const h=Math.round((1-(w.kg-mn)/rng)*36)+14;html+=`<div class="bar-col"><div class="bar" style="height:${h}px;background:var(--accent2)"></div><div class="bar-label">${w.kg}</div></div>`;});
+      html+=`</div>`;
+    }
+  } else {
+    html+=`<div style="color:var(--text3);font-size:13px;text-align:center;padding:14px">打卡时记录体重，趋势图将显示在这里</div>`;
+  }
+  html+=`</div>
+  <div style="padding:0 16px 8px">
+    <button class="opt-btn" style="width:100%;text-align:center;padding:11px" onclick="openWeightModal()">⚖️ 记录今日体重</button>
+  </div>`;
+
+  // 数据备份区
+  html+=`<div class="section-label">数据备份</div>
+  <div class="card" style="margin-bottom:24px">
+    <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:12px">
+      通过 GitHub Pages 网址访问时，更新文件后数据自动保留，无需手动备份。<br>
+      以下备份适用于：更换设备、清除浏览器数据、或作为额外保险。
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="opt-btn" style="flex:1;text-align:center;padding:10px;font-size:13px" onclick="exportData()">📤 导出备份</button>
+      <button class="opt-btn" style="flex:1;text-align:center;padding:10px;font-size:13px" onclick="document.getElementById('import-file').click()">📥 导入恢复</button>
+    </div>
+    <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(this)">
+  </div>`;
+  return html;
+}
+
+function genInsights(wn,rate,logs,dates){
+  const res=[];
+  if(rate<60&&dates.length>=3) res.push({icon:'⚠️',bg:'rgba(224,90,90,.15)',title:'完成率偏低',desc:`近期完成率${rate}%，考虑适当降低单次训练量，一致性比强度更重要。`});
+  else if(rate>=85) res.push({icon:'🔥',bg:'rgba(52,201,138,.15)',title:'完成率优秀',desc:`完成率${rate}%，执行力很强。确保蛋白质摄入140g+和7小时睡眠，决定下阶段效果。`});
+  else res.push({icon:'👍',bg:'rgba(79,142,247,.15)',title:'进度良好',desc:`完成率${rate}%，在正确轨道上。一致性是健身成功最重要的因素。`});
+  if(wn<=2) res.push({icon:'📌',bg:'rgba(245,166,35,.15)',title:'适应期：体态矫正优先',desc:'每天15分钟体态矫正（侧卧外旋+Y形举+胸小肌拉伸）比大重量训练对体态的改善更重要。'});
+  else if(wn===7) res.push({icon:'♻️',bg:'rgba(245,166,35,.15)',title:'减负周注意事项',desc:'本周体重短暂上升是正常现象，不是反弹。减负后下周力量会有突破。'});
+  else if(wn>=4) res.push({icon:'💪',bg:'rgba(79,142,247,.15)',title:`第${wn}周：观察肱骨前移改善`,desc:'检查：放松站立时手背是否开始朝向大腿外侧？若是，说明肩袖外旋训练已起效。'});
+  const recentF=dates.slice(-5).map(d=>logs[d].feeling||0).filter(f=>f>0);
+  if(recentF.length>=3&&recentF.reduce((a,b)=>a+b,0)/recentF.length<2.5)
+    res.push({icon:'😴',bg:'rgba(224,90,90,.1)',title:'近期疲劳感偏高',desc:'连续评分低可能是过度训练或睡眠不足。检查蛋白质摄入是否达到140g/天。'});
+  if(!res.length) res.push({icon:'📊',bg:'rgba(79,142,247,.1)',title:'开始记录获取分析',desc:'完成训练并打卡，这里会出现针对你情况的个性化分析。'});
+  return res;
+}
+
+// ══════════════════════════
+// MODAL: 动作详情
+// ══════════════════════════
+function showEx(wd,i){
+  const ex=PLAN[wd].exercises[i];
+  if(!ex)return;
+  const vkey=ex.video, vInfo=vkey?VIDEOS[vkey]:null;
+  const hasEmbed=vInfo&&vInfo.bvid;
+  const eUrl=hasEmbed?embedUrl(vkey):null;
+  const sq=ex.q;
+  const sUrl=sq?searchUrl(sq):null;
+
+  let vidSection='';
+  if(hasEmbed){
+    vidSection=`<div style="margin:0 20px 6px">
+      <div class="video-container"><iframe id="bili-iframe" src="${eUrl}" scrolling="no" frameborder="0" allowfullscreen="true"
+        sandbox="allow-top-navigation allow-same-origin allow-forms allow-scripts allow-popups allow-presentation"></iframe></div>
+      <div style="display:flex;align-items:center;gap:6px;padding:7px 0 4px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text3)">倍速:</span>
+        ${[0.75,1,1.25,1.5,2].map(s=>`<span class="speed-btn ${s===1?'speed-active':''}" onclick="setSpeedBtn(this,${s})">${s}x</span>`).join('')}
+        <div style="flex:1"></div>
+        <a href="https://www.bilibili.com/video/${vInfo.bvid}" target="_blank"
+          style="font-size:11px;color:var(--accent);background:rgba(79,142,247,.12);border:1px solid var(--accent);border-radius:20px;padding:3px 10px;text-decoration:none">B站完整观看 ›</a>
+      </div>
+      <div style="font-size:11px;color:var(--text3);padding-bottom:4px">来源: 哔哩哔哩 · ${vInfo.up}</div>
+    </div>`;
+  } else if(sUrl){
+    vidSection=`<div style="margin:0 20px 14px">
+      <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:13px;padding:18px;text-align:center">
+        <div style="font-size:22px;margin-bottom:8px">🎬</div>
+        <div style="font-size:14px;font-weight:500;margin-bottom:4px">${ex.name} 教学视频</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:14px">搜索词：「${sq}」</div>
+        <a href="${sUrl}" target="_blank" style="display:inline-block;background:var(--accent);color:#fff;border-radius:20px;padding:9px 22px;font-size:14px;font-weight:600;text-decoration:none">在 B站 搜索此动作 ›</a>
+      </div>
+    </div>`;
+  }
+
+  const tagHtml=ex.tag?`<span class="ex-tag tag-${ex.tag}" style="margin-left:8px">${ex.tagLabel}</span>`:'';
+
+  document.getElementById('modal').innerHTML=`<div class="modal-handle"></div>
+    <div class="modal-title">${ex.name}${tagHtml}</div>
+    ${vidSection}
+    <div class="log-row">
+      <div class="log-label">训练参数</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:5px">
+        <span class="badge badge-blue">${ex.sets}</span>
+        <span class="badge badge-green">${ex.reps}</span>
+        <span class="badge badge-amber">${ex.weight}</span>
+      </div>
+    </div>
+    <div class="log-row" style="border:none">
+      <div class="log-label">动作要点</div>
+      <div style="font-size:14px;color:var(--text);line-height:1.7;margin-top:5px;padding:11px;background:var(--bg3);border-radius:11px">${ex.tip}</div>
+    </div>
+    ${getExtraTip(ex.name)}
+    <button class="btn-primary" onclick="closeModal()">明白了</button>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+function setSpeedBtn(el,s){
+  document.querySelectorAll('.speed-btn').forEach(b=>b.classList.remove('speed-active'));
+  el.classList.add('speed-active');
+  try{const iframe=document.getElementById('bili-iframe');const vid=iframe?.contentDocument?.querySelector('video')||iframe?.contentWindow?.document?.querySelector('video');if(vid)vid.playbackRate=s;}catch(e){}
+}
+
+function getExtraTip(name){
+  const tips={
+    '辅助引体向上（离心）':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(245,166,35,.1);border-left:3px solid var(--accent3);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent3)">💡 离心训练（慢速放下）比拉上去更重要。坚持4周后引体能力会明显突破。</div></div>',
+    '弹力带面拉':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(79,142,247,.1);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent)">💡 这是纠正肱骨前移最重要的训练日动作，永远放在上肢日第一位做，趁神经最清醒时建立正确肩关节激活模式。</div></div>',
+    '侧卧哑铃外旋':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(245,166,35,.1);border-left:3px solid var(--accent3);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent3)">💡 上臂必须全程夹紧体侧，否则三角肌代偿。1-2kg感觉肩后侧酸胀才是正确，重量越轻反而动作越纯粹。</div></div>',
+    '俯卧Y形举':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(245,166,35,.1);border-left:3px solid var(--accent3);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent3)">💡 最常见错误是耸肩。做动作时想象肩膀往脚的方向下沉，再抬手臂。大拇指朝上是关键，改变了肱骨旋转角度。</div></div>',
+    '弹力带侧向走':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(245,166,35,.1);border-left:3px solid var(--accent3);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent3)">💡 改善O型腿最直接的动作，每次下肢日必做。感受髋外侧酸胀说明正确，不是大腿酸。</div></div>',
+    '传统硬拉':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(245,166,35,.1);border-left:3px solid var(--accent3);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent3)">💡 整个计划最重要的动作。口诀：起始时臀往后坐 → 提起时臀往前推 → 全程腹部收紧不弓腰。</div></div>',
+    '鸽子式拉伸':'<div class="log-row" style="border:none;margin-top:-6px"><div style="background:rgba(52,201,138,.1);border-left:3px solid var(--accent2);border-radius:0 10px 10px 0;padding:10px 12px;font-size:12px;color:var(--accent2)">💡 每天做比每周做三次效果好得多。梨状肌是O型腿和画圈步态的直接根源，每天松解是改善步态最快的方法。</div></div>',
+  };
+  return tips[name]||'';
+}
+
+// ══════════════════════════
+// MODAL: 每日体态
+// ══════════════════════════
+function showPostureModal(){
+  let html=`<div class="modal-handle"></div>
+    <div class="modal-title">🎯 每日必做体态矫正</div>
+    <div style="padding:0 20px 10px;font-size:12px;color:var(--accent3)">每天15分钟 · 训练前或睡前均可 · 比训练日更重要</div>`;
+  DAILY_POSTURE.forEach((p,i)=>{
+    const sq=searchUrl(p.q);
+    html+=`<div style="display:flex;align-items:center;gap:11px;padding:11px 20px;border-bottom:1px solid var(--border)">
+      <div style="width:26px;height:26px;border-radius:7px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--accent3);flex-shrink:0">${i+1}</div>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:500">${p.name}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${p.reps}</div>
+      </div>
+      <a href="${sq}" target="_blank" style="font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:14px;padding:3px 9px;text-decoration:none;white-space:nowrap">B站 ›</a>
+    </div>`;
+  });
+  html+=`<button class="btn-primary" onclick="closeModal()">关闭</button>`;
+  document.getElementById('modal').innerHTML=html;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+// ══════════════════════════
+// MODAL: 全天计划
+// ══════════════════════════
+function showDayDetail(wd){
+  const day=PLAN[wd];
+  const dnames=['','周一','周二','周三','周四','周五','周六','周日'];
+  let html=`<div class="modal-handle"></div>
+    <div class="modal-title">${day.emoji} ${dnames[wd]} · ${day.name}</div>
+    <div style="padding:0 20px 12px;font-size:13px;color:var(--text2)">${day.note}</div>`;
+  if(day.exercises.length>0){
+    html+=`<div style="padding:0 20px">`;
+    day.exercises.forEach((ex,i)=>{
+      const tagHtml=ex.tag?`<span class="ex-tag tag-${ex.tag}" style="margin-left:6px">${ex.tagLabel}</span>`:'';
+      html+=`<div class="ex-item" onclick="showEx(${wd},${i})">
+        <div class="ex-num">${i+1}</div>
+        <div class="ex-info">
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+            <span class="ex-name">${ex.name}</span>${tagHtml}
+          </div>
+          <div class="ex-meta">${ex.sets} · ${ex.reps} · ${ex.weight}</div>
+        </div>
+        <div style="color:var(--text3);font-size:17px">›</div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+  html+=`<button class="btn-primary" onclick="closeModal()">关闭</button>`;
+  document.getElementById('modal').innerHTML=html;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+// ══════════════════════════
+// MODAL: 打卡
+// ══════════════════════════
+function openLog(date){
+  logDate=date;
+  const log=getLog(date);
+  const fe=['','😫','😐','🙂','😊','🔥'];
+  document.getElementById('modal').innerHTML=`<div class="modal-handle"></div>
+    <div class="modal-title">📝 打卡 · ${dateLabel(date)}</div>
+    <div class="log-row">
+      <div class="log-label">训练感受</div>
+      <div class="log-stars">${[1,2,3,4,5].map(n=>`<div class="star-btn ${(log.feeling||0)>=n?'sel':''}" onclick="setFeel(${n})">${fe[n]}</div>`).join('')}</div>
+    </div>
+    <div class="log-row">
+      <div class="log-label">能量状态</div>
+      <div class="log-stars">${[1,2,3,4,5].map(n=>`<div class="star-btn ${(log.energy||0)>=n?'sel':''}" onclick="setEnergy(${n})">⚡</div>`).join('')}</div>
+    </div>
+    <div class="log-row">
+      <div class="log-label">遇到的问题</div>
+      <div class="log-options">${['动作不标准','重量太重','重量太轻','关节不适','时间不够','很疲惫','身体疼痛','腿软力竭'].map(issue=>
+        `<div class="opt-btn ${(log.issues||[]).includes(issue)?'sel':''}" onclick="toggleIssue('${issue}')">${issue}</div>`).join('')}
+      </div>
+    </div>
+    <div class="log-row">
+      <div class="log-label">体重（可选）</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+        <input type="number" step="0.1" min="40" max="120" value="${log.bodyweight||''}" placeholder="67.2" id="wt-inp"
+          style="background:var(--bg3);border:1px solid var(--border2);border-radius:11px;color:var(--text);padding:10px 14px;font-size:18px;width:120px;outline:none;font-family:'DM Mono',monospace">
+        <span style="color:var(--text2)">kg</span>
+      </div>
+    </div>
+    <div class="log-row" style="border:none">
+      <div class="log-label">备注</div>
+      <textarea class="log-textarea" rows="3" placeholder="今天的感受、重量记录..." id="log-notes">${log.notes||''}</textarea>
+    </div>
+    <button class="btn-primary" onclick="saveLog()">保存记录</button>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+function setFeel(n){const l=getLog(logDate);l.feeling=n;S.logs[logDate]=l;save();openLog(logDate);}
+function setEnergy(n){const l=getLog(logDate);l.energy=n;S.logs[logDate]=l;save();openLog(logDate);}
+function toggleIssue(issue){const l=getLog(logDate);if(!l.issues)l.issues=[];const p=l.issues.indexOf(issue);if(p===-1)l.issues.push(issue);else l.issues.splice(p,1);S.logs[logDate]=l;save();openLog(logDate);}
+function saveLog(){
+  const l=getLog(logDate);
+  const wt=parseFloat(document.getElementById('wt-inp')?.value);
+  const notes=document.getElementById('log-notes')?.value;
+  if(wt&&!isNaN(wt)){l.bodyweight=wt;const ex=S.weights.findIndex(w=>w.date===logDate);if(ex>=0)S.weights[ex].kg=wt;else S.weights.push({date:logDate,kg:wt});S.weights.sort((a,b)=>a.date.localeCompare(b.date));}
+  if(notes!==undefined)l.notes=notes;
+  S.logs[logDate]=l;save();closeModal();showPage(page);
+}
+
+function openWeightModal(){
+  const tod=todayStr(),ex=S.weights.find(w=>w.date===tod);
+  document.getElementById('modal').innerHTML=`<div class="modal-handle"></div>
+    <div class="modal-title">⚖️ 记录体重</div>
+    <div class="log-row" style="border:none">
+      <div class="log-label">今日体重</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+        <input type="number" step="0.1" min="40" max="120" value="${ex?.kg||''}" placeholder="67.0" id="wt2"
+          style="background:var(--bg3);border:1px solid var(--border2);border-radius:11px;color:var(--text);padding:13px 16px;font-size:22px;width:150px;outline:none;font-family:'DM Mono',monospace">
+        <span style="font-size:18px;color:var(--text2)">kg</span>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="saveWeight()">保存</button>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+function saveWeight(){
+  const wt=parseFloat(document.getElementById('wt2')?.value);
+  if(!wt||isNaN(wt))return closeModal();
+  const tod=todayStr(),ex=S.weights.findIndex(w=>w.date===tod);
+  if(ex>=0)S.weights[ex].kg=wt;else S.weights.push({date:tod,kg:wt});
+  S.weights.sort((a,b)=>a.date.localeCompare(b.date));
+  save();closeModal();showPage('stats');
+}
+
+function toggleEx(e,date,i){
+  e.stopPropagation();
+  const l=getLog(date);const p=l.completed.indexOf(i);
+  if(p===-1)l.completed.push(i);else l.completed.splice(p,1);
+  S.logs[date]=l;save();showPage(page);
+}
+function quickDone(date){
+  const allI=getPlanDay(date).exercises.map((_,i)=>i);
+  const l=getLog(date);l.completed=l.completed.length===allI.length?[]:allI;
+  S.logs[date]=l;save();showPage(page);
+}
+
+// ── 数据导出/导入 ──
+function exportData(){
+  const json = JSON.stringify(S, null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const date = todayStr();
+  a.href = url;
+  a.download = '训练数据备份_' + date + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData(input){
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const data = JSON.parse(e.target.result);
+      if(!data.startDate || !data.logs) {
+        alert('文件格式不正确，请选择之前导出的备份文件');
+        return;
+      }
+      if(confirm('导入后将覆盖当前所有数据，确认继续？')){
+        S = data;
+        save();
+        showPage(page);
+        alert('数据导入成功！共恢复 ' + Object.keys(S.logs).length + ' 天记录');
+      }
+    } catch(err){
+      alert('导入失败：文件解析错误');
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+function closeModal(){
+  const iframe=document.querySelector('#modal iframe');if(iframe)iframe.src='';
+  document.getElementById('modal-overlay').classList.remove('show');
+}
+function closeModalOutside(e){if(e.target===document.getElementById('modal-overlay'))closeModal();}
+
+// INIT
+viewDate=todayStr();
+showPage('plan');
+setTimeout(()=>{const el=document.getElementById('dp-'+todayStr());if(el)el.scrollIntoView({behavior:'instant',block:'nearest',inline:'center'});},50);
+</script>
+</body>
+</html>
