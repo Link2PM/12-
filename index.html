@@ -19,14 +19,31 @@
   --safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden}
-body{background:var(--bg);color:var(--text);font-family:'Noto Sans SC',sans-serif;user-select:none}
-#app{display:flex;flex-direction:column;height:100%;padding-top:var(--safe-t)}
-#view{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-bottom:calc(60px + var(--safe-b) + 12px)}
-#nav{position:fixed;bottom:0;left:0;right:0;z-index:100;
-  background:#0a0f1e;border-top:1px solid var(--border);}
-#nav-inner{display:flex;align-items:center;height:60px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);}
-#nav-pad{height:var(--safe-b);background:#0a0f1e;}
+html{height:100%;background:#0a0f1e;}
+body{
+  height:100%;min-height:-webkit-fill-available;
+  overflow:hidden;background:#0a0f1e;
+  color:var(--text);font-family:'Noto Sans SC',sans-serif;user-select:none;
+}
+#app{
+  display:flex;flex-direction:column;
+  height:100%;min-height:-webkit-fill-available;
+  padding-top:env(safe-area-inset-top,0px);
+}
+#view{
+  flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
+  padding-bottom:calc(60px + env(safe-area-inset-bottom,0px) + 16px);
+}
+#nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:#0a0f1e;
+  border-top:1px solid var(--border);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+#nav-inner{
+  display:flex;align-items:center;width:100%;height:60px;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+}
 .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;cursor:pointer}
 .nav-icon{font-size:20px;line-height:1;transition:transform .2s}
 .nav-label{font-size:10px;color:var(--text2);font-weight:500;letter-spacing:.02em;transition:color .2s}
@@ -153,7 +170,6 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans SC',sans-seri
       <div class="nav-item" onclick="showPage('log')" id="nav-log"><div class="nav-icon">✏️</div><div class="nav-label">打卡</div></div>
       <div class="nav-item" onclick="showPage('stats')" id="nav-stats"><div class="nav-icon">📊</div><div class="nav-label">分析</div></div>
     </div>
-    <div id="nav-pad"></div>
   </nav>
 </div>
 <div id="modal-overlay" onclick="closeModalOutside(event)"><div id="modal"></div></div>
@@ -270,28 +286,42 @@ const PHASES = [
 // ══════════════════════════
 // STATE
 // ══════════════════════════
-// APP_VERSION：每次训练计划内容有变化时递增，用于提示用户
-const APP_PLAN_VERSION = 2; // 修订版·含体态矫正调整
+const APP_PLAN_VERSION = 2;
 
-let S = JSON.parse(localStorage.getItem('fit_app')||'null') || {
-  startDate: todayStr(),
-  logs: {},
-  weights: [],
-  planVersion: APP_PLAN_VERSION,
-  planSwitchDates: {} // {版本号: 切换日期} 记录每次计划变更的时间点
-};
+// 自动迁移旧版数据（兼容所有历史key）
+function migrateOldData(){
+  const keys=['fit_v7','fit_v6','fs2_state'];
+  for(const k of keys){
+    try{
+      const raw=localStorage.getItem(k);
+      if(raw){
+        const old=JSON.parse(raw);
+        if(old && old.logs){
+          localStorage.setItem('fit_app',raw);
+          localStorage.removeItem(k);
+          return old;
+        }
+      }
+    }catch(e){}
+  }
+  return null;
+}
 
-// 检测计划版本变化，自动记录切换日期而不丢失数据
+function todayStr(){return new Date().toISOString().split('T')[0];}
+
+let S = JSON.parse(localStorage.getItem('fit_app')||'null')
+     || migrateOldData()
+     || {startDate:todayStr(),logs:{},weights:[],planVersion:APP_PLAN_VERSION,planSwitchDates:{}};
+
 if(S.planVersion !== APP_PLAN_VERSION){
-  if(!S.planSwitchDates) S.planSwitchDates = {};
-  S.planSwitchDates[APP_PLAN_VERSION] = todayStr();
-  S.planVersion = APP_PLAN_VERSION;
-  localStorage.setItem('fit_app', JSON.stringify(S));
+  if(!S.planSwitchDates) S.planSwitchDates={};
+  S.planSwitchDates[APP_PLAN_VERSION]=todayStr();
+  S.planVersion=APP_PLAN_VERSION;
+  localStorage.setItem('fit_app',JSON.stringify(S));
 }
 let page='plan', viewDate=todayStr(), logDate=null;
 
 function save(){localStorage.setItem('fit_app',JSON.stringify(S));}
-function todayStr(){return new Date().toISOString().split('T')[0];}
 function weekday(ds){const j=new Date(ds+'T12:00:00').getDay();return j===0?7:j;}
 function weekNum(ds){
   const diff=Math.floor((new Date(ds+'T12:00:00')-new Date(S.startDate+'T12:00:00'))/(864e5));
