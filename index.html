@@ -1833,7 +1833,13 @@ function escHtml(str) {
 
 async function getCurrentWeekDay() {
   const startDate = await getSetting('startDate');
-  if (!startDate) return { weekNum: 3, dayIdx: 0 };
+  // 没设 startDate 时,假设"今天 = Week 3 周一"作为合理默认
+  if (!startDate) {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const dayIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    return { weekNum: 3, dayIdx };
+  }
   const start = new Date(startDate);
   start.setHours(0, 0, 0, 0);
   const today = new Date();
@@ -1919,12 +1925,24 @@ function isViewingToday() {
 // 根据任意日期计算 weekNum 和 dayIdx
 async function getWeekDayForDate(dateStr) {
   const startDate = await getSetting('startDate');
-  if (!startDate) return { weekNum: 3, dayIdx: 0 };
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
+  // 没设 startDate 时,假设"今天 = Week 3 周一"作为锚点,仍然计算正确的相对偏移
+  // 这样切换到不同日期时训练内容会正确变化(尽管 week 映射可能不准)
+  let effectiveStart;
+  if (!startDate) {
+    // 用今天推算:找到本周的周一作为虚拟 startDate
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayOfWeek = today.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    effectiveStart = new Date(today);
+    effectiveStart.setDate(today.getDate() - daysToMonday);
+  } else {
+    effectiveStart = new Date(startDate);
+    effectiveStart.setHours(0, 0, 0, 0);
+  }
   const target = new Date(dateStr);
   target.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((target - start) / (24 * 60 * 60 * 1000));
+  const diffDays = Math.floor((target - effectiveStart) / (24 * 60 * 60 * 1000));
   const dayOfWeek = target.getDay();
   const dayIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
   const weekOffset = Math.floor(diffDays / 7);
@@ -2613,12 +2631,13 @@ async function renderSettings() {
     </div>
     <div class="export-section">
       <div class="export-section-title">📥 导入数据</div>
-      <div class="export-section-desc">从之前导出的 JSON 文件恢复数据</div>
+      <div class="export-section-desc">从之前导出的 JSON 文件恢复数据。导入后会显示详细的导入结果和错误信息(如有)</div>
       <div class="export-buttons">
         <label class="btn-secondary" style="display: inline-block;">
           选择文件
           <input type="file" accept="application/json" style="display: none;" onchange="importJSON(event)">
         </label>
+        <button class="btn-secondary" onclick="diagnoseData()">数据诊断</button>
       </div>
     </div>
     <div class="spacer-lg"></div>
@@ -2632,7 +2651,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v7.2<br>
+      体态修复训练手册 · v7.4<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -3116,6 +3135,17 @@ async function importJSON(event) {
   const text = await file.text();
   try {
     const data = JSON.parse(text);
+    
+    // 读取统计,让用户看到导入的内容
+    const stats = {
+      workoutLogs: (data.workoutLogs || []).length,
+      exerciseNotes: (data.exerciseNotes || []).length,
+      dailyHabits: (data.dailyHabits || []).length,
+      bodyMetrics: (data.bodyMetrics || []).length,
+      settings: (data.settings || []).length,
+      media: (data.media || []).length
+    };
+    
     const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'media'];
     for (const store of stores) {
       const all = await dbGetAll(store);
@@ -3124,20 +3154,131 @@ async function importJSON(event) {
         await dbDelete(store, key);
       }
     }
-    for (const log of (data.workoutLogs || [])) await dbPut('workoutLogs', log);
-    for (const note of (data.exerciseNotes || [])) await dbPut('exerciseNotes', note);
-    for (const habit of (data.dailyHabits || [])) await dbPut('dailyHabits', habit);
-    for (const metric of (data.bodyMetrics || [])) await dbPut('bodyMetrics', metric);
-    for (const setting of (data.settings || [])) await dbPut('settings', setting);
-    for (const m of (data.media || [])) {
-      const res = await fetch(m.dataUrl);
-      const blob = await res.blob();
-      await dbPut('media', { id: m.id, noteId: m.noteId, type: m.type, filename: m.filename, blob });
+    
+    // 导入时记录错误
+    const errors = [];
+    let logsCount = 0, notesCount = 0, habitsCount = 0, metricsCount = 0;
+    
+    for (const log of (data.workoutLogs || [])) {
+      try {
+        // 兼容:如果没有 id 字段,让 IDB 自增
+        const toStore = { ...log };
+        if (toStore.id === undefined) delete toStore.id;
+        await dbPut('workoutLogs', toStore);
+        logsCount++;
+      } catch (e) { errors.push(`workoutLog: ${e.message}`); }
     }
-    showToast('导入完成');
-    setTimeout(() => location.reload(), 1000);
+    
+    for (const note of (data.exerciseNotes || [])) {
+      try {
+        const toStore = { ...note };
+        if (toStore.id === undefined) delete toStore.id;
+        await dbPut('exerciseNotes', toStore);
+        notesCount++;
+      } catch (e) { errors.push(`exerciseNote: ${e.message}`); }
+    }
+    
+    for (const habit of (data.dailyHabits || [])) {
+      try {
+        // dailyHabits 用 date 作为 keyPath,必须有
+        if (!habit.date) { errors.push(`habit 缺少 date 字段`); continue; }
+        await dbPut('dailyHabits', habit);
+        habitsCount++;
+      } catch (e) { errors.push(`habit: ${e.message}`); }
+    }
+    
+    for (const metric of (data.bodyMetrics || [])) {
+      try {
+        const toStore = { ...metric };
+        if (toStore.id === undefined) delete toStore.id;
+        await dbPut('bodyMetrics', toStore);
+        metricsCount++;
+      } catch (e) { errors.push(`metric: ${e.message}`); }
+    }
+    
+    for (const setting of (data.settings || [])) {
+      try {
+        if (!setting.key) { errors.push(`setting 缺少 key 字段`); continue; }
+        await dbPut('settings', setting);
+      } catch (e) { errors.push(`setting: ${e.message}`); }
+    }
+    
+    for (const m of (data.media || [])) {
+      try {
+        if (!m.dataUrl) { errors.push(`media 缺少 dataUrl`); continue; }
+        const res = await fetch(m.dataUrl);
+        const blob = await res.blob();
+        const toStore = { noteId: m.noteId, type: m.type, filename: m.filename, blob };
+        if (m.id !== undefined) toStore.id = m.id;
+        await dbPut('media', toStore);
+      } catch (e) { errors.push(`media: ${e.message}`); }
+    }
+    
+    // 显示导入结果
+    let resultMsg = `导入完成:\n`;
+    resultMsg += `• 训练记录: ${logsCount} / ${stats.workoutLogs}\n`;
+    resultMsg += `• 动作记录: ${notesCount} / ${stats.exerciseNotes}\n`;
+    resultMsg += `• 习惯打卡: ${habitsCount} / ${stats.dailyHabits}\n`;
+    resultMsg += `• 体测数据: ${metricsCount} / ${stats.bodyMetrics}\n`;
+    if (errors.length > 0) {
+      resultMsg += `\n错误 ${errors.length} 条:\n${errors.slice(0, 5).join('\n')}`;
+    }
+    alert(resultMsg);
+    setTimeout(() => location.reload(), 500);
   } catch (e) {
     alert('导入失败: ' + e.message);
+  }
+}
+
+// 数据诊断:显示数据库中的内容摘要
+async function diagnoseData() {
+  try {
+    const logs = await dbGetAll('workoutLogs');
+    const notes = await dbGetAll('exerciseNotes');
+    const habits = await dbGetAll('dailyHabits');
+    const metrics = await dbGetAll('bodyMetrics');
+    const settings = await dbGetAll('settings');
+    const media = await dbGetAll('media');
+    
+    let msg = `【当前数据库内容】\n\n`;
+    msg += `训练记录 (workoutLogs): ${logs.length} 条\n`;
+    if (logs.length > 0) {
+      const dates = [...new Set(logs.map(l => l.date))].sort();
+      msg += `  日期范围: ${dates[0]} ~ ${dates[dates.length - 1]}\n`;
+      const completedCount = logs.filter(l => l.completed).length;
+      msg += `  已完成: ${completedCount}\n`;
+      // 样本
+      msg += `  样本字段: ${Object.keys(logs[0]).join(', ')}\n`;
+      // 检查 exerciseId 是否匹配当前动作库
+      const allExIds = new Set(getAllExercises().map(e => e.id));
+      const unknownIds = [...new Set(logs.map(l => l.exerciseId))].filter(id => !allExIds.has(id));
+      if (unknownIds.length > 0) {
+        msg += `  ⚠ 发现 ${unknownIds.length} 个无法匹配的动作 ID,样本: ${unknownIds.slice(0,3).join(', ')}\n`;
+      }
+    }
+    msg += `\n动作记录 (exerciseNotes): ${notes.length} 条\n`;
+    if (notes.length > 0) {
+      msg += `  样本字段: ${Object.keys(notes[0]).join(', ')}\n`;
+    }
+    msg += `\n习惯打卡 (dailyHabits): ${habits.length} 天\n`;
+    if (habits.length > 0) {
+      const dates = habits.map(h => h.date).sort();
+      msg += `  日期范围: ${dates[0]} ~ ${dates[dates.length - 1]}\n`;
+    }
+    msg += `\n体测数据 (bodyMetrics): ${metrics.length} 条\n`;
+    if (metrics.length > 0) {
+      const dates = [...new Set(metrics.map(m => m.date))].sort();
+      msg += `  日期范围: ${dates[0]} ~ ${dates[dates.length - 1]}\n`;
+      const metricIds = [...new Set(metrics.map(m => m.metricId))];
+      msg += `  指标类型: ${metricIds.join(', ')}\n`;
+    }
+    msg += `\n设置 (settings): ${settings.length} 项\n`;
+    settings.forEach(s => msg += `  ${s.key}: ${s.value}\n`);
+    msg += `\n媒体文件 (media): ${media.length} 个`;
+    
+    alert(msg);
+  } catch (e) {
+    alert('诊断失败: ' + e.message);
   }
 }
 
