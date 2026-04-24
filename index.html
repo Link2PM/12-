@@ -55,7 +55,6 @@ html, body {
 
 body {
   padding-bottom: env(safe-area-inset-bottom);
-  padding-top: env(safe-area-inset-top);
   min-height: 100vh;
 }
 
@@ -195,10 +194,15 @@ textarea {
 .app-header {
   position: sticky;
   top: 0;
+  left: 0;
+  right: 0;
   background: var(--bg-0);
   border-bottom: 1px solid var(--line);
   z-index: 100;
   padding-top: env(safe-area-inset-top);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  background: rgba(10, 10, 10, 0.92);
 }
 
 .app-title {
@@ -2651,7 +2655,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v7.4<br>
+      体态修复训练手册 · v7.5<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -2909,67 +2913,76 @@ function closeMediaViewer() {
 // ============================================================
 // 视频选择 Modal
 // ============================================================
+// 尝试唤起 Bilibili App,失败后回退到网页
+function openBilibiliSearch(searchQuery) {
+  const encodedQuery = encodeURIComponent(searchQuery);
+  const schemeUrl = `bilibili://search?keyword=${encodedQuery}`;
+  const webUrl = `https://m.bilibili.com/search?keyword=${encodedQuery}`;
+  
+  // iOS 上尝试唤起 App
+  // 如果 App 没装,scheme 调用会"失败"但没有明确回调
+  // 策略: 先立即尝试 scheme,然后 1.5 秒后如果页面还在(说明 App 没被唤起),打开网页
+  const startTime = Date.now();
+  
+  // 用 location.href 触发 scheme(比 window.open 更可靠)
+  try {
+    window.location.href = schemeUrl;
+  } catch (e) {
+    // 某些浏览器 scheme 失败会抛异常,直接走 fallback
+    window.open(webUrl, '_blank');
+    return;
+  }
+  
+  // Fallback: 如果 1.5 秒后页面还在前台,说明 App 没被唤起(没装或 scheme 失效)
+  setTimeout(() => {
+    // 如果页面被切到后台(App 唤起成功),document.hidden 会变 true
+    // 如果还在前台,说明没被唤起,打开网页
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 3000 && !document.hidden) {
+      window.open(webUrl, '_blank');
+    }
+  }, 1500);
+}
+
 function openVideoModal(exerciseName) {
   const video = getVideoForExercise(exerciseName);
   const searchQuery = video.q || (exerciseName + ' 教学');
-  const encodedQuery = encodeURIComponent(searchQuery);
   
-  document.getElementById('video-modal-title').textContent = exerciseName;
-  
-  let html = '';
-  
-  // 如果有精选 BV ID,直接嵌入播放
-  if (video.bv) {
-    html += `
-      <div style="padding: 16px;">
-        <div style="font-size: 12px; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.1em;">⭐ 精选教学</div>
-        <div class="video-iframe-wrapper">
-          <iframe 
-            src="//player.bilibili.com/player.html?bvid=${video.bv}&page=1&high_quality=1&danmaku=0" 
-            scrolling="no" 
-            frameborder="0" 
-            allowfullscreen="true">
-          </iframe>
-        </div>
-        ${video.note ? `<div style="font-size: 12px; color: var(--text-2); padding: 8px 0; line-height: 1.6;">${escHtml(video.note)}</div>` : ''}
-      </div>
-    `;
+  // 没有精选 BV ID 时,直接跳转,不弹 modal
+  if (!video.bv) {
+    openBilibiliSearch(searchQuery);
+    return;
   }
   
-  // 始终提供搜索选项
-  html += `
+  // 有精选 BV 时,弹 modal 内嵌播放 + 提供跳 App 的选项
+  const encodedQuery = encodeURIComponent(searchQuery);
+  document.getElementById('video-modal-title').textContent = exerciseName;
+  
+  let html = `
+    <div style="padding: 16px;">
+      <div style="font-size: 12px; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.1em;">⭐ 精选教学</div>
+      <div class="video-iframe-wrapper">
+        <iframe 
+          src="//player.bilibili.com/player.html?bvid=${video.bv}&page=1&high_quality=1&danmaku=0" 
+          scrolling="no" 
+          frameborder="0" 
+          allowfullscreen="true">
+        </iframe>
+      </div>
+      ${video.note ? `<div style="font-size: 12px; color: var(--text-2); padding: 8px 0; line-height: 1.6;">${escHtml(video.note)}</div>` : ''}
+    </div>
     <div class="video-options">
-      <div style="font-size: 12px; color: var(--text-2); margin-bottom: 4px; letter-spacing: 0.1em;">${video.bv ? '更多视频' : '搜索教学视频'}</div>
-      
-      <a class="video-option" href="https://m.bilibili.com/search?keyword=${encodedQuery}" target="_blank" rel="noopener">
+      <div style="font-size: 12px; color: var(--text-2); margin-bottom: 4px; letter-spacing: 0.1em;">更多教学</div>
+      <a class="video-option" href="javascript:void(0)" onclick="openBilibiliSearch('${escHtml(searchQuery).replace(/'/g, "\\'")}'); closeVideoModal();">
         <div class="video-option-icon">📺</div>
         <div class="video-option-content">
-          <div class="video-option-title">Bilibili 搜索</div>
+          <div class="video-option-title">Bilibili 搜索更多</div>
           <div class="video-option-desc">${escHtml(searchQuery)}</div>
         </div>
         <div class="video-option-arrow">›</div>
       </a>
-      
-      <a class="video-option" href="https://www.youtube.com/results?search_query=${encodedQuery}" target="_blank" rel="noopener">
-        <div class="video-option-icon">▶️</div>
-        <div class="video-option-content">
-          <div class="video-option-title">YouTube 搜索</div>
-          <div class="video-option-desc">${escHtml(searchQuery)}</div>
-        </div>
-        <div class="video-option-arrow">›</div>
-      </a>
-      
-      <a class="video-option" href="https://www.google.com/search?q=${encodedQuery}&tbm=vid" target="_blank" rel="noopener">
-        <div class="video-option-icon">🔍</div>
-        <div class="video-option-content">
-          <div class="video-option-title">Google 视频搜索</div>
-          <div class="video-option-desc">备用,中英文混合结果</div>
-        </div>
-        <div class="video-option-arrow">›</div>
-      </a>
-      
       <div style="margin-top: 8px; padding: 12px; background: var(--bg-2); border-radius: var(--radius); font-size: 11px; color: var(--text-3); line-height: 1.6;">
-        💡 找到合适的视频后,可以在「📝 记录」里把 BV 号或链接保存下来,方便下次直接打开
+        💡 找到更好的视频,可以在「📝 记录」里保存 BV 号或链接
       </div>
     </div>
   `;
