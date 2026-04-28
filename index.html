@@ -1517,6 +1517,299 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
   };
 }
 
+// ============================================================
+// Phase 1: 对称巩固期 (Week 7-10) - 引体进阶 + 重量稳步上升
+// ============================================================
+function buildPhase1Week(weekNum, w, isLastWeek) {
+  const note = isLastWeek
+    ? '🏁 Phase 1 毕业周。本周末测试: 完整引体向上 1 个 + 硬拉 55kg × 8 + 体脂下降 ≥ 1 个百分点'
+    : `Phase 1 重点: 动作模式固化, 重量稳步增加, 完成第一个引体向上`;
+  return {
+    weekNum,
+    phase: 'Phase 1 - 对称巩固期',
+    note,
+    days: [
+      {
+        dayName: '周一', dayType: 'training', title: 'P1 上肢拉日 · 引体进阶',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d1-1`, name: '死悬', sets: '3 组 × 45 秒', weight: '自重', tip: '为引体打基础, 主动下沉肩胛' },
+            { id: `w${weekNum}-d1-2`, name: '弹力带辅助引体', sets: `4 组 × 5 次`, weight: w.bandPullup, tip: '🔑 比辅助机更接近真实动作模式' },
+            { id: `w${weekNum}-d1-3`, name: '高位下拉(反握)', sets: '4 组 × 8 次', weight: `${w.pulldownReverse} kg`, tip: '反握减少上斜方代偿' },
+            { id: `w${weekNum}-d1-4`, name: '坐姿绳索划船(窄握)', sets: '4 组 × 10 次', weight: `${w.seatedRow} kg`, tip: '顶峰停 2 秒, 挤压肩胛' },
+            { id: `w${weekNum}-d1-5`, name: '单臂哑铃划船', sets: '4 组 × 10 次/侧', weight: `${w.dbRow} kg`, tip: '左右严格对称' },
+            { id: `w${weekNum}-d1-6`, name: '面拉', sets: '4 组 × 15 次', weight: '中等', tip: '后三角 + 下斜方' },
+            { id: `w${weekNum}-d1-7`, name: '弹力带肩外旋', sets: '3 组 × 15 次/侧', weight: '弹力带', tip: '修肩袖, 预防引体训练受伤' }
+          ]
+        }, {
+          title: '握力收尾',
+          exercises: [
+            { id: `w${weekNum}-d1-grip`, name: '哑铃悬挂', sets: '3 组 × 力竭', weight: '22 kg', tip: '握力是引体的隐藏瓶颈' }
+          ]
+        }]
+      },
+      {
+        dayName: '周二', dayType: 'training', title: 'P1 下肢日 · 髋铰链强化',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d2-1`, name: '蚌式 + 侧步激活', sets: '3 组 × 12 次/侧', weight: '阻力带', tip: '激活臀中肌' },
+            { id: `w${weekNum}-d2-2`, name: '罗马尼亚硬拉(RDL)', sets: '4 组 × 8 次', weight: `${w.rdl} kg`, tip: '🔑 髋铰链核心动作, 不要变成深蹲' },
+            { id: `w${weekNum}-d2-3`, name: '高脚杯深蹲', sets: '4 组 × 10 次', weight: `哑铃 ${w.gobletSquat} kg`, tip: w.frontSquatNote || '躯干直立, 膝盖不内扣' },
+            ...(w.frontSquat ? [{ id: `w${weekNum}-d2-3b`, name: '杠铃前蹲', sets: '3 组 × 8 次', weight: `${w.frontSquat} kg`, tip: '🆕 引入前蹲, 比后蹲更易保持上身直立' }] : []),
+            { id: `w${weekNum}-d2-4`, name: '保加利亚分腿蹲', sets: '3 组 × 8 次/侧', weight: w.splitSquat, tip: '左侧先做' },
+            { id: `w${weekNum}-d2-5`, name: '单腿 RDL', sets: '3 组 × 8 次/侧', weight: w.singleRdl, tip: '后链 + 足踝稳定' },
+            { id: `w${weekNum}-d2-6`, name: '髋外展器械', sets: '3 组 × 15 次', weight: '中等', tip: 'O 型腿专项' },
+            { id: `w${weekNum}-d2-7`, name: '提踵 + 胫骨前肌', sets: '3 组 × 15 次', weight: '自重', tip: '小腿前后平衡' }
+          ]
+        }]
+      },
+      {
+        dayName: '周三', dayType: 'training', title: 'P1 核心日 + Zone 2 有氧',
+        description: '低关节负荷日',
+        groups: [{
+          title: '核心循环 × 3 轮',
+          description: '每轮无休完成, 轮间休 90 秒',
+          exercises: [
+            { id: `w${weekNum}-d3-c1`, name: '死虫加重', sets: '12 次', weight: '3 kg', tip: '腰贴地' },
+            { id: `w${weekNum}-d3-c2`, name: '鸟狗', sets: '12 次/侧', weight: '自重', tip: '对侧稳定' },
+            { id: `w${weekNum}-d3-c3`, name: '侧平板', sets: '40 秒/侧', weight: '自重', tip: '稳定加时间' },
+            { id: `w${weekNum}-d3-c4`, name: 'Pallof Press', sets: '12 次/侧', weight: '中等', tip: '抗旋转' },
+            { id: `w${weekNum}-d3-c5`, name: '反向卷腹', sets: '15 次', weight: '自重', tip: '下腹激活' }
+          ]
+        }, {
+          title: 'Zone 2 有氧',
+          exercises: [
+            { id: `w${weekNum}-d3-cardio`, name: 'Zone 2 有氧', sets: '20 分钟', weight: '心率 120-135', tip: '能鼻呼吸、能正常说话' }
+          ]
+        }]
+      },
+      {
+        dayName: '周四', dayType: 'training', title: 'P1 上肢推日 · 卧推升级',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d4-1`, name: '俯卧撑加强版(Push-up Plus)', sets: '3 组 × 12 次', weight: '自重', tip: '前锯激活' },
+            { id: `w${weekNum}-d4-2`, name: '哑铃卧推', sets: '4 组 × 10 次', weight: `${w.dbBench} kg/侧`, tip: '双手独立, 强制对称' },
+            { id: `w${weekNum}-d4-3`, name: '哑铃推肩(坐姿)', sets: '4 组 × 10 次/侧', weight: `${w.dbShoulderPress} kg`, tip: '左侧先做' },
+            { id: `w${weekNum}-d4-4`, name: '上斜哑铃飞鸟', sets: '3 组 × 12 次', weight: '8 kg/侧', tip: '🆕 上胸刺激, 改善圆肩' },
+            { id: `w${weekNum}-d4-5`, name: '绳索下压', sets: '3 组 × 12 次', weight: '中等', tip: '三头肌' },
+            { id: `w${weekNum}-d4-6`, name: 'YTW 俯卧', sets: '3 组 × 10 次/动作', weight: `${w.ytw} kg`, tip: '巩固后链' }
+          ]
+        }]
+      },
+      {
+        dayName: '周五', dayType: 'training', title: 'P1 整合日 + 引体专项',
+        groups: [{
+          title: '整合动作 + 引体专项',
+          exercises: [
+            { id: `w${weekNum}-d5-1`, name: '哑铃行走', sets: '4 组 × 40 米', weight: `${w.farmerWalk} kg/侧`, tip: '修复期最高性价比动作' },
+            { id: `w${weekNum}-d5-2`, name: '单侧哑铃行走', sets: '3 组 × 20 米/侧', weight: `${w.suitcaseWalk} kg`, tip: '抗侧屈' },
+            { id: `w${weekNum}-d5-3`, name: '弹力带辅助引体(慢离心)', sets: `4 组 × 5 次`, weight: w.bandPullup, tip: '🔑 5 秒下放, 离心训练' },
+            { id: `w${weekNum}-d5-4`, name: '山羊挺(负重)', sets: '3 组 × 10 次', weight: '5 kg', tip: '后链强化' },
+            { id: `w${weekNum}-d5-5`, name: '悬垂举腿', sets: '3 组 × 10 次', weight: '自重', tip: '深层核心 + 握力' },
+            { id: `w${weekNum}-d5-6`, name: '绳索劈柴', sets: '3 组 × 10 次/侧', weight: '中等', tip: '抗旋转 + 全身整合' }
+          ]
+        }, {
+          title: '握力收尾',
+          exercises: [
+            { id: `w${weekNum}-d5-grip`, name: '毛巾卷悬挂', sets: '3 组 × 力竭', weight: '自重', tip: '🆕 毛巾增加握力难度, 直接提升引体' }
+          ]
+        }]
+      },
+      { dayName: '周六', dayType: 'recovery', title: 'P1 筋膜松解 + 自由活动', description: '60 分钟专业松解 + 评估测试' },
+      { dayName: '周日', dayType: 'rest', title: 'P1 主动恢复', description: '晨间重置 + 户外散步 30-45 分钟 + Zone 2 心率' }
+    ]
+  };
+}
+
+// ============================================================
+// Phase 2: 渐进期 (Week 11-14) - 杠铃双侧动作回归 + 引体目标 3 个
+// ============================================================
+function buildPhase2Week(weekNum, w, isLastWeek) {
+  const note = isLastWeek
+    ? '🏁 Phase 2 毕业周。本周末测试: 连续引体 3 个 + 硬拉 65kg × 5 + 体脂 ≤ 18% + 姿态外人可察觉改善'
+    : `Phase 2 重点: 杠铃双侧动作回归, 引体目标 3 个, 饮食 -200 kcal/天`;
+  return {
+    weekNum,
+    phase: 'Phase 2 - 渐进期',
+    note,
+    days: [
+      {
+        dayName: '周一', dayType: 'training', title: 'P2 杠铃拉日 · 力量进阶',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d1-1`, name: '死悬 + 肩胛激活', sets: '3 组 × 60 秒', weight: '自重', tip: '主动下沉, 为引体准备' },
+            { id: `w${weekNum}-d1-2`, name: '完整引体向上', sets: `${w.pullupSets} 组 × ${w.pullupReps} 次`, weight: '自重', tip: '🔑 P2 重点: 累计完成 ' + (w.pullupSets * w.pullupReps) + ' 次' },
+            { id: `w${weekNum}-d1-3`, name: '杠铃划船(反握)', sets: '4 组 × 8 次', weight: `${w.barbellRow} kg`, tip: '🆕 杠铃双侧动作回归, 髋铰链 + 反握' },
+            { id: `w${weekNum}-d1-4`, name: '高位下拉(宽握)', sets: '3 组 × 10 次', weight: `${w.pulldownWide} kg`, tip: '宽握刺激背阔上部' },
+            { id: `w${weekNum}-d1-5`, name: 'T 杆划船', sets: '3 组 × 10 次', weight: `${w.tBarRow} kg`, tip: '🆕 中下背部厚度' },
+            { id: `w${weekNum}-d1-6`, name: '面拉', sets: '4 组 × 15 次', weight: '中等', tip: '后三角 + 下斜方, 必做' }
+          ]
+        }, {
+          title: '握力 + 后链',
+          exercises: [
+            { id: `w${weekNum}-d1-grip`, name: '哑铃悬挂', sets: '3 组 × 力竭', weight: '25 kg', tip: '握力上升' }
+          ]
+        }]
+      },
+      {
+        dayName: '周二', dayType: 'training', title: 'P2 杠铃下肢日 · 后蹲回归',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d2-1`, name: '动态热身 + 蚌式激活', sets: '5 分钟', weight: '阻力带', tip: '杠铃训练前必须充分激活' },
+            { id: `w${weekNum}-d2-2`, name: '杠铃硬拉', sets: '4 组 × 6 次', weight: `${w.deadlift} kg`, tip: '🔑 P2 重头戏, 髋铰链 + 后链整合' },
+            { id: `w${weekNum}-d2-3`, name: '杠铃后蹲', sets: '4 组 × 8 次', weight: `${w.backSquat} kg`, tip: '🆕 杠铃双侧动作回归, 杆+' + (w.backSquat - 20) + 'kg' },
+            { id: `w${weekNum}-d2-4`, name: '保加利亚分腿蹲', sets: '3 组 × 8 次/侧', weight: w.splitSquat, tip: '左右单腿不平衡持续修正' },
+            { id: `w${weekNum}-d2-5`, name: '单腿 RDL', sets: '3 组 × 8 次/侧', weight: w.singleRdl, tip: '后链 + 足踝稳定' },
+            { id: `w${weekNum}-d2-6`, name: '髋外展器械', sets: '3 组 × 15 次', weight: '中等', tip: 'O 型腿专项' }
+          ]
+        }]
+      },
+      {
+        dayName: '周三', dayType: 'training', title: 'P2 引体专项 + 核心',
+        description: 'Phase 2 关键安排: 周三专门打引体',
+        groups: [{
+          title: '引体专项 (45 分钟)',
+          description: 'P2 引体目标 3 个的核心训练日',
+          exercises: [
+            { id: `w${weekNum}-d3-1`, name: '完整引体向上', sets: `${w.pullupSets} 组 × ${w.pullupReps} 次`, weight: '自重', tip: '🔑 完整动作, 顶峰下巴过杠' },
+            { id: `w${weekNum}-d3-2`, name: '弹力带辅助引体(顶峰停留)', sets: '3 组 × 5 次', weight: '细弹力带', tip: '🆕 顶峰停 2 秒, 强化最难位置' },
+            { id: `w${weekNum}-d3-3`, name: '离心引体', sets: '3 组 × 3 次', weight: '自重', tip: '🆕 跳到顶, 5 秒下放至完全伸直' },
+            { id: `w${weekNum}-d3-4`, name: '面拉', sets: '3 组 × 15 次', weight: '中等', tip: '保护肩袖' }
+          ]
+        }, {
+          title: '核心循环 × 2 轮',
+          exercises: [
+            { id: `w${weekNum}-d3-c1`, name: '死虫加重', sets: '15 次', weight: '4 kg', tip: '' },
+            { id: `w${weekNum}-d3-c2`, name: '侧平板', sets: '50 秒/侧', weight: '自重', tip: '左右对称' },
+            { id: `w${weekNum}-d3-c3`, name: 'Pallof Press', sets: '15 次/侧', weight: '中等', tip: '抗旋转' }
+          ]
+        }]
+      },
+      {
+        dayName: '周四', dayType: 'training', title: 'P2 杠铃推日 · 卧推回归',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d4-1`, name: '热身组 + 肩胛激活', sets: '5 分钟', weight: '弹力带', tip: '前锯肌 + 肩袖热身' },
+            { id: `w${weekNum}-d4-2`, name: '杠铃卧推', sets: '4 组 × 8 次', weight: `${w.benchPress} kg`, tip: '🆕 杠铃双侧动作回归, 杆+' + (w.benchPress - 20) + 'kg' },
+            { id: `w${weekNum}-d4-3`, name: '哑铃推肩(坐姿)', sets: '4 组 × 10 次/侧', weight: `${w.dbShoulderPress} kg`, tip: '双手独立, 修复对称' },
+            { id: `w${weekNum}-d4-4`, name: '上斜哑铃卧推', sets: '3 组 × 10 次', weight: `${w.inclineDb} kg/侧`, tip: '上胸 + 改善圆肩' },
+            { id: `w${weekNum}-d4-5`, name: '绳索下压 + 三头过头屈伸', sets: '3 组 × 12 次', weight: '中等', tip: '三头肌全长度' },
+            { id: `w${weekNum}-d4-6`, name: 'YTW 俯卧', sets: '3 组 × 12 次/动作', weight: '3 kg', tip: '后链平衡推日' }
+          ]
+        }]
+      },
+      {
+        dayName: '周五', dayType: 'training', title: 'P2 整合日 + 引体专项',
+        groups: [{
+          title: '整合 + 引体',
+          exercises: [
+            { id: `w${weekNum}-d5-1`, name: '完整引体向上', sets: `${w.pullupSets} 组 × ${w.pullupReps} 次`, weight: '自重', tip: '本周第三次引体专项' },
+            { id: `w${weekNum}-d5-2`, name: '哑铃行走', sets: '4 组 × 40 米', weight: `${w.farmerWalk} kg/侧`, tip: '握力 + 全身稳定' },
+            { id: `w${weekNum}-d5-3`, name: '土耳其起立', sets: '3 组 × 3 次/侧', weight: `${w.turkish} kg`, tip: '🆕 全身整合 + 肩稳定' },
+            { id: `w${weekNum}-d5-4`, name: '哑铃 Swing', sets: '4 组 × 12 次', weight: `${w.swing} kg`, tip: '🆕 髋铰链爆发力' },
+            { id: `w${weekNum}-d5-5`, name: '悬垂举腿', sets: '3 组 × 12 次', weight: '自重', tip: '深层核心' },
+            { id: `w${weekNum}-d5-6`, name: '绳索劈柴', sets: '3 组 × 12 次/侧', weight: '中等', tip: '抗旋转' }
+          ]
+        }]
+      },
+      { dayName: '周六', dayType: 'recovery', title: 'P2 筋膜松解(2 周 1 次) / 自由活动', description: 'P2 期筋膜松解频率降为 2 周 1 次。非松解周做 30 分钟 Zone 2' },
+      { dayName: '周日', dayType: 'rest', title: 'P2 主动恢复', description: '户外散步 45 分钟 + 热水澡, Zone 2 有氧轻松' }
+    ]
+  };
+}
+
+// ============================================================
+// Phase 3: 目标期 (Week 15-18) - 引体冲刺 5 个
+// ============================================================
+function buildPhase3Week(weekNum, w, isLastWeek) {
+  const note = isLastWeek
+    ? '🏁 Phase 3 毕业测试 + 三甲复诊。终极目标: 连续引体 5 个 + 体脂 16-17% + 三甲报告显著改善'
+    : `Phase 3 重点: 引体专项化 (EMOM / 离心延时 / 多握法), 终极目标 5 个`;
+  return {
+    weekNum,
+    phase: 'Phase 3 - 目标期',
+    note,
+    days: [
+      {
+        dayName: '周一', dayType: 'training', title: 'P3 引体冲刺日 · 密度法',
+        groups: [{
+          title: '引体专项 - 密度法 (EMOM)',
+          description: '🎯 P3 重点协议: 每分钟开始做 max-1 次',
+          exercises: [
+            { id: `w${weekNum}-d1-1`, name: '死悬 + 激活', sets: '3 组 × 60 秒', weight: '自重', tip: '充分热身, 主动下沉肩胛' },
+            { id: `w${weekNum}-d1-2`, name: 'EMOM 引体向上', sets: `${w.emomMinutes} 分钟`, weight: '自重', tip: `🎯 每分钟 ${w.emomReps} 次, 共 ${w.emomMinutes * w.emomReps} 次` },
+            { id: `w${weekNum}-d1-3`, name: '负重引体(可选)', sets: '3 组 × 3 次', weight: w.weightedPullup, tip: '🆕 系腰带挂哑铃, 提高基础力量' },
+            { id: `w${weekNum}-d1-4`, name: '高位下拉 + 引体辅助', sets: '3 组 × 8 次', weight: `${w.pulldownWide} kg`, tip: '辅助训练' },
+            { id: `w${weekNum}-d1-5`, name: '面拉', sets: '4 组 × 15 次', weight: '中等', tip: '保护肩袖, 防引体训练受伤' }
+          ]
+        }]
+      },
+      {
+        dayName: '周二', dayType: 'training', title: 'P3 杠铃下肢日',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d2-1`, name: '热身 + 蚌式 + 髋激活', sets: '5 分钟', weight: '阻力带', tip: '大重量前充分激活' },
+            { id: `w${weekNum}-d2-2`, name: '杠铃硬拉', sets: '4 组 × 5 次', weight: `${w.deadlift} kg`, tip: '🔑 力量峰值期, 注意腰背中立' },
+            { id: `w${weekNum}-d2-3`, name: '杠铃后蹲', sets: '4 组 × 6 次', weight: `${w.backSquat} kg`, tip: '保持深度 + 膝盖外推' },
+            { id: `w${weekNum}-d2-4`, name: '保加利亚分腿蹲', sets: '3 组 × 8 次/侧', weight: w.splitSquat, tip: '左右修正' },
+            { id: `w${weekNum}-d2-5`, name: '单腿 RDL + 哑铃', sets: '3 组 × 8 次/侧', weight: '10 kg', tip: '后链 + 足踝稳定' }
+          ]
+        }]
+      },
+      {
+        dayName: '周三', dayType: 'training', title: 'P3 引体专项 · 离心延时',
+        groups: [{
+          title: '引体专项 - 离心延时 + 多握法',
+          description: '🎯 P3 协议二: 3 秒上 + 5 秒下',
+          exercises: [
+            { id: `w${weekNum}-d3-1`, name: '死悬 + L-sit', sets: '3 组 × 30 秒', weight: '自重', tip: '🆕 提腿死悬, 增加核心 + 握力难度' },
+            { id: `w${weekNum}-d3-2`, name: '离心延时引体', sets: '3 组 × 3 次', weight: '自重', tip: '🎯 3 秒上 + 5 秒下, 共 9 次离心' },
+            { id: `w${weekNum}-d3-3`, name: '多握法引体', sets: '3 组 × 3 次/握法', weight: '自重', tip: '🆕 正握 / 反握 / 中立握, 各 3 次' },
+            { id: `w${weekNum}-d3-4`, name: 'T 杆划船', sets: '3 组 × 8 次', weight: `${w.tBarRow} kg`, tip: '中下背部厚度' },
+            { id: `w${weekNum}-d3-5`, name: '核心循环', sets: '3 轮', weight: '自重', tip: '死虫 15 / 侧平板 60s / 鸟狗 12' }
+          ]
+        }]
+      },
+      {
+        dayName: '周四', dayType: 'training', title: 'P3 杠铃推日',
+        groups: [{
+          title: '主训练',
+          exercises: [
+            { id: `w${weekNum}-d4-1`, name: '热身 + 前锯激活', sets: '5 分钟', weight: '弹力带', tip: '' },
+            { id: `w${weekNum}-d4-2`, name: '杠铃卧推', sets: '4 组 × 6 次', weight: `${w.benchPress} kg`, tip: '力量上限期, 保持肩胛后缩' },
+            { id: `w${weekNum}-d4-3`, name: '推举(站姿)', sets: '4 组 × 8 次', weight: `${w.overheadPress} kg`, tip: '🆕 站姿肩推, 全身整合' },
+            { id: `w${weekNum}-d4-4`, name: '上斜哑铃卧推', sets: '3 组 × 8 次', weight: `${w.inclineDb} kg/侧`, tip: '上胸刺激' },
+            { id: `w${weekNum}-d4-5`, name: '倒立撑墙体支撑', sets: '3 组 × 30 秒', weight: '自重', tip: '🆕 倒立准备, 极限肩稳定' },
+            { id: `w${weekNum}-d4-6`, name: '绳索下压', sets: '3 组 × 12 次', weight: '中等', tip: '三头肌' }
+          ]
+        }]
+      },
+      {
+        dayName: '周五', dayType: 'training', title: 'P3 整合日 · 终极测试',
+        groups: [{
+          title: '引体测试 + 整合',
+          exercises: [
+            { id: `w${weekNum}-d5-1`, name: '引体最大次数测试', sets: '1 组 × max', weight: '自重', tip: `🎯 ${isLastWeek ? '终极测试 5 个目标!' : '记录每周最大次数, 看进步曲线'}` },
+            { id: `w${weekNum}-d5-2`, name: '完整引体向上(剩余组数)', sets: `3 组 × ${w.pullupReps} 次`, weight: '自重', tip: '剩余正常组数' },
+            { id: `w${weekNum}-d5-3`, name: '哑铃行走', sets: '4 组 × 40 米', weight: `${w.farmerWalk} kg/侧`, tip: '基础整合' },
+            { id: `w${weekNum}-d5-4`, name: '土耳其起立', sets: '3 组 × 3 次/侧', weight: `${w.turkish} kg`, tip: '终极整合动作' },
+            { id: `w${weekNum}-d5-5`, name: 'L-sit 悬挂', sets: '3 组 × 力竭', weight: '自重', tip: '🆕 核心 + 握力综合测试' }
+          ]
+        }]
+      },
+      { dayName: '周六', dayType: 'recovery', title: isLastWeek ? 'P3 三甲复诊 + 评估' : 'P3 筋膜松解 / 自由活动', description: isLastWeek ? '回三甲复诊评估上交叉、核心、足踝三大问题改善情况' : '2 周 1 次松解 + 30 分钟 Zone 2' },
+      { dayName: '周日', dayType: 'rest', title: 'P3 主动恢复', description: '深度恢复 + 户外活动 + 准备下周冲击' }
+    ]
+  };
+}
+
 const WEEKS = [
   {
     weekNum: 3,
@@ -1577,7 +1870,25 @@ const WEEKS = [
   },
   buildActivationWeek(4, { rdl: 35, gobletSquat: 12, splitSquat: '自重', singleRdl: '自重', pulldownReverse: 45, seatedRow: 35, dbRow: 13, dbBench: 10, dbShoulderPress: 10, ytw: 1, farmerWalk: 12, suitcaseWalk: 10, assistedPullup: 35 }, false),
   buildActivationWeek(5, { rdl: 40, gobletSquat: 15, splitSquat: '各 5 kg', singleRdl: '5 kg', pulldownReverse: 50, seatedRow: 40, dbRow: 15, dbBench: 12, dbShoulderPress: 12, ytw: 1, farmerWalk: 14, suitcaseWalk: 12, assistedPullup: 32 }, false),
-  buildActivationWeek(6, { rdl: 45, gobletSquat: 17, splitSquat: '各 5 kg', singleRdl: '5 kg', pulldownReverse: 50, seatedRow: 40, dbRow: 15, dbBench: 12, dbShoulderPress: 13, ytw: 2, farmerWalk: 14, suitcaseWalk: 12, assistedPullup: 30 }, true)
+  buildActivationWeek(6, { rdl: 45, gobletSquat: 17, splitSquat: '各 5 kg', singleRdl: '5 kg', pulldownReverse: 50, seatedRow: 40, dbRow: 15, dbBench: 12, dbShoulderPress: 13, ytw: 2, farmerWalk: 14, suitcaseWalk: 12, assistedPullup: 30 }, true),
+  
+  // ========== Phase 1: Week 7-10 ==========
+  buildPhase1Week(7, { rdl: 50, gobletSquat: 20, splitSquat: '各 7 kg', singleRdl: '7 kg', pulldownReverse: 55, seatedRow: 45, dbRow: 17, dbBench: 14, dbShoulderPress: 14, ytw: 2, farmerWalk: 16, suitcaseWalk: 14, bandPullup: '粗弹力带' }, false),
+  buildPhase1Week(8, { rdl: 50, gobletSquat: 20, splitSquat: '各 7 kg', singleRdl: '7 kg', pulldownReverse: 55, seatedRow: 45, dbRow: 17, dbBench: 14, dbShoulderPress: 14, ytw: 2, farmerWalk: 16, suitcaseWalk: 14, bandPullup: '粗弹力带' }, false),
+  buildPhase1Week(9, { rdl: 52.5, gobletSquat: 22, splitSquat: '各 8 kg', singleRdl: '8 kg', pulldownReverse: 60, seatedRow: 50, dbRow: 18, dbBench: 15, dbShoulderPress: 15, ytw: 2, farmerWalk: 18, suitcaseWalk: 15, bandPullup: '中弹力带', frontSquat: 30, frontSquatNote: '高脚杯过渡到杠铃前蹲' }, false),
+  buildPhase1Week(10, { rdl: 52.5, gobletSquat: 22, splitSquat: '各 8 kg', singleRdl: '8 kg', pulldownReverse: 60, seatedRow: 50, dbRow: 18, dbBench: 15, dbShoulderPress: 15, ytw: 2, farmerWalk: 18, suitcaseWalk: 15, bandPullup: '中弹力带', frontSquat: 30, frontSquatNote: '高脚杯过渡到杠铃前蹲' }, true),
+  
+  // ========== Phase 2: Week 11-14 ==========
+  buildPhase2Week(11, { deadlift: 60, backSquat: 40, barbellRow: 40, benchPress: 30, pulldownWide: 55, tBarRow: 30, splitSquat: '各 10 kg', singleRdl: '10 kg', dbShoulderPress: 16, inclineDb: 12, farmerWalk: 20, turkish: 8, swing: 12, pullupSets: 3, pullupReps: 2 }, false),
+  buildPhase2Week(12, { deadlift: 60, backSquat: 40, barbellRow: 40, benchPress: 30, pulldownWide: 55, tBarRow: 30, splitSquat: '各 10 kg', singleRdl: '10 kg', dbShoulderPress: 16, inclineDb: 12, farmerWalk: 20, turkish: 8, swing: 12, pullupSets: 3, pullupReps: 2 }, false),
+  buildPhase2Week(13, { deadlift: 65, backSquat: 45, barbellRow: 45, benchPress: 35, pulldownWide: 60, tBarRow: 35, splitSquat: '各 10 kg', singleRdl: '10 kg', dbShoulderPress: 17, inclineDb: 14, farmerWalk: 22, turkish: 10, swing: 14, pullupSets: 4, pullupReps: 3 }, false),
+  buildPhase2Week(14, { deadlift: 65, backSquat: 45, barbellRow: 45, benchPress: 35, pulldownWide: 60, tBarRow: 35, splitSquat: '各 10 kg', singleRdl: '10 kg', dbShoulderPress: 17, inclineDb: 14, farmerWalk: 22, turkish: 10, swing: 14, pullupSets: 4, pullupReps: 3 }, true),
+  
+  // ========== Phase 3: Week 15-18 ==========
+  buildPhase3Week(15, { deadlift: 70, backSquat: 50, benchPress: 40, overheadPress: 25, pulldownWide: 65, tBarRow: 40, splitSquat: '各 12 kg', inclineDb: 16, farmerWalk: 25, turkish: 12, emomMinutes: 10, emomReps: 3, weightedPullup: '自重 +2.5 kg', pullupReps: 3 }, false),
+  buildPhase3Week(16, { deadlift: 75, backSquat: 55, benchPress: 42.5, overheadPress: 27.5, pulldownWide: 65, tBarRow: 40, splitSquat: '各 12 kg', inclineDb: 16, farmerWalk: 25, turkish: 12, emomMinutes: 10, emomReps: 3, weightedPullup: '自重 +5 kg', pullupReps: 4 }, false),
+  buildPhase3Week(17, { deadlift: 75, backSquat: 55, benchPress: 45, overheadPress: 30, pulldownWide: 70, tBarRow: 45, splitSquat: '各 12 kg', inclineDb: 18, farmerWalk: 28, turkish: 14, emomMinutes: 10, emomReps: 4, weightedPullup: '自重 +5 kg', pullupReps: 4 }, false),
+  buildPhase3Week(18, { deadlift: 80, backSquat: 60, benchPress: 47.5, overheadPress: 32.5, pulldownWide: 70, tBarRow: 45, splitSquat: '各 12 kg', inclineDb: 18, farmerWalk: 28, turkish: 14, emomMinutes: 10, emomReps: 5, weightedPullup: '自重 +7.5 kg', pullupReps: 5 }, true)
 ];
 
 const HABITS = {
@@ -2655,7 +2966,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v7.5<br>
+      体态修复训练手册 · v8.0<br>
       「完成 80% > 完美 50%」
     </div>`;
   
