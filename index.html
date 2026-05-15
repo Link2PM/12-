@@ -478,6 +478,30 @@ main {
   margin-top: 4px;
 }
 
+.last-note-preview {
+  background: rgba(212, 175, 55, 0.06);
+  border-left: 2px solid var(--accent-dim);
+  padding: 6px 10px;
+  margin-top: 6px;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.last-note-date {
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.last-note-text {
+  color: var(--text-1);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 .exercise-actions {
   display: flex;
   gap: 6px;
@@ -1416,16 +1440,28 @@ const PLAN_DATA = {
 };
 
 function buildActivationWeek(weekNum, w, isLastWeek) {
-  const note = isLastWeek 
-    ? '🎬 本周末完成动作录像自检（RDL、深蹲、单臂划船三个动作）。Phase 0 毕业评估。'
-    : null;
+  // 每周的阶段说明,让用户清楚自己在 Phase 0 的哪个阶段
+  const stageLabels = {
+    3: '🌱 启动',
+    4: '🌿 建立',
+    5: '🍀 强化',
+    6: '🏁 毕业测试'
+  };
+  const stage = stageLabels[weekNum] || '';
+  
+  const noteParts = [];
+  if (weekNum === 3) noteParts.push('Phase 0 第 1 周 · 重点是建立感知,不是冲重量。每组之间休息 90 秒。');
+  if (weekNum === 4) noteParts.push('Phase 0 第 2 周 · 加入标准训练动作,重量比 Week 3 提升一档。');
+  if (weekNum === 5) noteParts.push('Phase 0 第 3 周 · 巩固动作模式,重量再提升。');
+  if (weekNum === 6) noteParts.push('Phase 0 第 4 周 · 🏁 毕业测试周! 本周末完成动作录像自检(RDL、深蹲、单臂划船),并准备进入 Phase 1。');
+  
   return {
     weekNum,
-    phase: 'Phase 0 - 基础激活期',
-    note,
+    phase: `Phase 0 - 基础激活期 (Week ${weekNum}/6 · ${stage})`,
+    note: noteParts.join(' '),
     days: [
       {
-        dayName: '周一', dayType: 'training', title: '上肢拉日 · 肩胛与左侧弱链',
+        dayName: '周一', dayType: 'training', title: `Week ${weekNum} 周一 · 上肢拉日 (${stage})`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1444,7 +1480,7 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周二', dayType: 'training', title: '下肢日 · 髋铰链与足踝',
+        dayName: '周二', dayType: 'training', title: `Week ${weekNum} 周二 · 下肢日 (髋铰链与足踝)`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1459,7 +1495,7 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周三', dayType: 'training', title: '核心 + Zone 2 有氧',
+        dayName: '周三', dayType: 'training', title: `Week ${weekNum} 周三 · 核心 + Zone 2 有氧`,
         description: '低关节负荷日，在两个力量日之间',
         groups: [{
           title: '核心循环 × 3 轮',
@@ -1479,7 +1515,7 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周四', dayType: 'training', title: '上肢推日 · 前锯肌与胸椎',
+        dayName: '周四', dayType: 'training', title: `Week ${weekNum} 周四 · 上肢推日 (前锯肌与胸椎)`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1493,7 +1529,7 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周五', dayType: 'training', title: '整合日 + 核心强化',
+        dayName: '周五', dayType: 'training', title: `Week ${weekNum} 周五 · 整合日 + 核心强化`,
         groups: [{
           title: '整合动作',
           exercises: [
@@ -1511,8 +1547,8 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
           ]
         }]
       },
-      { dayName: '周六', dayType: 'recovery', title: '专业筋膜松解 + 自由活动', description: '60 分钟专业松解，前后做评估测试。剩余时间自由' },
-      { dayName: '周日', dayType: 'rest', title: '完全休息', description: '只做晨间重置 + 微习惯' }
+      { dayName: '周六', dayType: 'recovery', title: `Week ${weekNum} 周六 · 专业筋膜松解 + 自由活动`, description: '60 分钟专业松解，前后做评估测试。剩余时间自由' },
+      { dayName: '周日', dayType: 'rest', title: `Week ${weekNum} 周日 · 完全休息`, description: '只做晨间重置 + 微习惯' }
     ]
   };
 }
@@ -1521,16 +1557,25 @@ function buildActivationWeek(weekNum, w, isLastWeek) {
 // Phase 1: 对称巩固期 (Week 7-10) - 引体进阶 + 重量稳步上升
 // ============================================================
 function buildPhase1Week(weekNum, w, isLastWeek) {
+  const phaseWeekIdx = weekNum - 6; // Week 7 → 1, Week 8 → 2 ...
+  const stageLabels = {
+    7: '🌱 启动',
+    8: '🌿 适应',
+    9: '🍀 强化',
+    10: '🏁 毕业测试'
+  };
+  const stage = stageLabels[weekNum] || '';
+  
   const note = isLastWeek
-    ? '🏁 Phase 1 毕业周。本周末测试: 完整引体向上 1 个 + 硬拉 55kg × 8 + 体脂下降 ≥ 1 个百分点'
-    : `Phase 1 重点: 动作模式固化, 重量稳步增加, 完成第一个引体向上`;
+    ? `🏁 Phase 1 毕业周 (Week ${weekNum}/10)。本周末测试: 完整引体向上 1 个 + 硬拉 55kg × 8 + 体脂下降 ≥ 1 个百分点`
+    : `Phase 1 第 ${phaseWeekIdx} 周 · ${stage} · 重点: 动作模式固化, 重量稳步增加, 完成第一个引体向上`;
   return {
     weekNum,
-    phase: 'Phase 1 - 对称巩固期',
+    phase: `Phase 1 - 对称巩固期 (Week ${weekNum}/10 · ${stage})`,
     note,
     days: [
       {
-        dayName: '周一', dayType: 'training', title: 'P1 上肢拉日 · 引体进阶',
+        dayName: '周一', dayType: 'training', title: `Week ${weekNum} 周一 · P1 上肢拉日 · 引体进阶 (${stage})`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1550,7 +1595,7 @@ function buildPhase1Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周二', dayType: 'training', title: 'P1 下肢日 · 髋铰链强化',
+        dayName: '周二', dayType: 'training', title: `Week ${weekNum} 周二 · P1 下肢日 · 髋铰链强化`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1566,7 +1611,7 @@ function buildPhase1Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周三', dayType: 'training', title: 'P1 核心日 + Zone 2 有氧',
+        dayName: '周三', dayType: 'training', title: `Week ${weekNum} 周三 · P1 核心日 + Zone 2 有氧`,
         description: '低关节负荷日',
         groups: [{
           title: '核心循环 × 3 轮',
@@ -1586,7 +1631,7 @@ function buildPhase1Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周四', dayType: 'training', title: 'P1 上肢推日 · 卧推升级',
+        dayName: '周四', dayType: 'training', title: `Week ${weekNum} 周四 · P1 上肢推日 · 卧推升级`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1600,7 +1645,7 @@ function buildPhase1Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周五', dayType: 'training', title: 'P1 整合日 + 引体专项',
+        dayName: '周五', dayType: 'training', title: `Week ${weekNum} 周五 · P1 整合日 + 引体专项`,
         groups: [{
           title: '整合动作 + 引体专项',
           exercises: [
@@ -1618,8 +1663,8 @@ function buildPhase1Week(weekNum, w, isLastWeek) {
           ]
         }]
       },
-      { dayName: '周六', dayType: 'recovery', title: 'P1 筋膜松解 + 自由活动', description: '60 分钟专业松解 + 评估测试' },
-      { dayName: '周日', dayType: 'rest', title: 'P1 主动恢复', description: '晨间重置 + 户外散步 30-45 分钟 + Zone 2 心率' }
+      { dayName: '周六', dayType: 'recovery', title: `Week ${weekNum} 周六 · P1 筋膜松解 + 自由活动`, description: '60 分钟专业松解 + 评估测试' },
+      { dayName: '周日', dayType: 'rest', title: `Week ${weekNum} 周日 · P1 主动恢复`, description: '晨间重置 + 户外散步 30-45 分钟 + Zone 2 心率' }
     ]
   };
 }
@@ -1628,16 +1673,25 @@ function buildPhase1Week(weekNum, w, isLastWeek) {
 // Phase 2: 渐进期 (Week 11-14) - 杠铃双侧动作回归 + 引体目标 3 个
 // ============================================================
 function buildPhase2Week(weekNum, w, isLastWeek) {
+  const phaseWeekIdx = weekNum - 10;
+  const stageLabels = {
+    11: '🌱 启动',
+    12: '🌿 适应',
+    13: '🍀 强化',
+    14: '🏁 毕业测试'
+  };
+  const stage = stageLabels[weekNum] || '';
+  
   const note = isLastWeek
-    ? '🏁 Phase 2 毕业周。本周末测试: 连续引体 3 个 + 硬拉 65kg × 5 + 体脂 ≤ 18% + 姿态外人可察觉改善'
-    : `Phase 2 重点: 杠铃双侧动作回归, 引体目标 3 个, 饮食 -200 kcal/天`;
+    ? `🏁 Phase 2 毕业周 (Week ${weekNum}/14)。本周末测试: 连续引体 3 个 + 硬拉 65kg × 5 + 体脂 ≤ 18% + 姿态外人可察觉改善`
+    : `Phase 2 第 ${phaseWeekIdx} 周 · ${stage} · 重点: 杠铃双侧动作回归, 引体目标 3 个, 饮食 -200 kcal/天`;
   return {
     weekNum,
-    phase: 'Phase 2 - 渐进期',
+    phase: `Phase 2 - 渐进期 (Week ${weekNum}/14 · ${stage})`,
     note,
     days: [
       {
-        dayName: '周一', dayType: 'training', title: 'P2 杠铃拉日 · 力量进阶',
+        dayName: '周一', dayType: 'training', title: `Week ${weekNum} 周一 · P2 杠铃拉日 · 力量进阶 (${stage})`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1656,7 +1710,7 @@ function buildPhase2Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周二', dayType: 'training', title: 'P2 杠铃下肢日 · 后蹲回归',
+        dayName: '周二', dayType: 'training', title: `Week ${weekNum} 周二 · P2 杠铃下肢日 · 后蹲回归`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1670,7 +1724,7 @@ function buildPhase2Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周三', dayType: 'training', title: 'P2 引体专项 + 核心',
+        dayName: '周三', dayType: 'training', title: `Week ${weekNum} 周三 · P2 引体专项 + 核心`,
         description: 'Phase 2 关键安排: 周三专门打引体',
         groups: [{
           title: '引体专项 (45 分钟)',
@@ -1691,7 +1745,7 @@ function buildPhase2Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周四', dayType: 'training', title: 'P2 杠铃推日 · 卧推回归',
+        dayName: '周四', dayType: 'training', title: `Week ${weekNum} 周四 · P2 杠铃推日 · 卧推回归`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1705,7 +1759,7 @@ function buildPhase2Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周五', dayType: 'training', title: 'P2 整合日 + 引体专项',
+        dayName: '周五', dayType: 'training', title: `Week ${weekNum} 周五 · P2 整合日 + 引体专项`,
         groups: [{
           title: '整合 + 引体',
           exercises: [
@@ -1718,8 +1772,8 @@ function buildPhase2Week(weekNum, w, isLastWeek) {
           ]
         }]
       },
-      { dayName: '周六', dayType: 'recovery', title: 'P2 筋膜松解(2 周 1 次) / 自由活动', description: 'P2 期筋膜松解频率降为 2 周 1 次。非松解周做 30 分钟 Zone 2' },
-      { dayName: '周日', dayType: 'rest', title: 'P2 主动恢复', description: '户外散步 45 分钟 + 热水澡, Zone 2 有氧轻松' }
+      { dayName: '周六', dayType: 'recovery', title: `Week ${weekNum} 周六 · P2 筋膜松解(2 周 1 次) / 自由活动`, description: 'P2 期筋膜松解频率降为 2 周 1 次。非松解周做 30 分钟 Zone 2' },
+      { dayName: '周日', dayType: 'rest', title: `Week ${weekNum} 周日 · P2 主动恢复`, description: '户外散步 45 分钟 + 热水澡, Zone 2 有氧轻松' }
     ]
   };
 }
@@ -1728,16 +1782,25 @@ function buildPhase2Week(weekNum, w, isLastWeek) {
 // Phase 3: 目标期 (Week 15-18) - 引体冲刺 5 个
 // ============================================================
 function buildPhase3Week(weekNum, w, isLastWeek) {
+  const phaseWeekIdx = weekNum - 14;
+  const stageLabels = {
+    15: '🌱 启动',
+    16: '🌿 适应',
+    17: '🍀 强化',
+    18: '🏁 终极测试'
+  };
+  const stage = stageLabels[weekNum] || '';
+  
   const note = isLastWeek
-    ? '🏁 Phase 3 毕业测试 + 三甲复诊。终极目标: 连续引体 5 个 + 体脂 16-17% + 三甲报告显著改善'
-    : `Phase 3 重点: 引体专项化 (EMOM / 离心延时 / 多握法), 终极目标 5 个`;
+    ? `🏁 Phase 3 毕业测试 + 三甲复诊 (Week ${weekNum}/18)。终极目标: 连续引体 5 个 + 体脂 16-17% + 三甲报告显著改善`
+    : `Phase 3 第 ${phaseWeekIdx} 周 · ${stage} · 引体专项化 (EMOM / 离心延时 / 多握法), 终极目标 5 个`;
   return {
     weekNum,
-    phase: 'Phase 3 - 目标期',
+    phase: `Phase 3 - 目标期 (Week ${weekNum}/18 · ${stage})`,
     note,
     days: [
       {
-        dayName: '周一', dayType: 'training', title: 'P3 引体冲刺日 · 密度法',
+        dayName: '周一', dayType: 'training', title: `Week ${weekNum} 周一 · P3 引体冲刺日 · 密度法 (${stage})`,
         groups: [{
           title: '引体专项 - 密度法 (EMOM)',
           description: '🎯 P3 重点协议: 每分钟开始做 max-1 次',
@@ -1751,7 +1814,7 @@ function buildPhase3Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周二', dayType: 'training', title: 'P3 杠铃下肢日',
+        dayName: '周二', dayType: 'training', title: `Week ${weekNum} 周二 · P3 杠铃下肢日`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1764,7 +1827,7 @@ function buildPhase3Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周三', dayType: 'training', title: 'P3 引体专项 · 离心延时',
+        dayName: '周三', dayType: 'training', title: `Week ${weekNum} 周三 · P3 引体专项 · 离心延时`,
         groups: [{
           title: '引体专项 - 离心延时 + 多握法',
           description: '🎯 P3 协议二: 3 秒上 + 5 秒下',
@@ -1778,7 +1841,7 @@ function buildPhase3Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周四', dayType: 'training', title: 'P3 杠铃推日',
+        dayName: '周四', dayType: 'training', title: `Week ${weekNum} 周四 · P3 杠铃推日`,
         groups: [{
           title: '主训练',
           exercises: [
@@ -1792,7 +1855,7 @@ function buildPhase3Week(weekNum, w, isLastWeek) {
         }]
       },
       {
-        dayName: '周五', dayType: 'training', title: 'P3 整合日 · 终极测试',
+        dayName: '周五', dayType: 'training', title: `Week ${weekNum} 周五 · P3 整合日 · 终极测试`,
         groups: [{
           title: '引体测试 + 整合',
           exercises: [
@@ -1804,8 +1867,8 @@ function buildPhase3Week(weekNum, w, isLastWeek) {
           ]
         }]
       },
-      { dayName: '周六', dayType: 'recovery', title: isLastWeek ? 'P3 三甲复诊 + 评估' : 'P3 筋膜松解 / 自由活动', description: isLastWeek ? '回三甲复诊评估上交叉、核心、足踝三大问题改善情况' : '2 周 1 次松解 + 30 分钟 Zone 2' },
-      { dayName: '周日', dayType: 'rest', title: 'P3 主动恢复', description: '深度恢复 + 户外活动 + 准备下周冲击' }
+      { dayName: '周六', dayType: 'recovery', title: isLastWeek ? `Week ${weekNum} 周六 · P3 三甲复诊 + 评估` : `Week ${weekNum} 周六 · P3 筋膜松解 / 自由活动`, description: isLastWeek ? '回三甲复诊评估上交叉、核心、足踝三大问题改善情况' : '2 周 1 次松解 + 30 分钟 Zone 2' },
+      { dayName: '周日', dayType: 'rest', title: `Week ${weekNum} 周日 · P3 主动恢复`, description: '深度恢复 + 户外活动 + 准备下周冲击' }
     ]
   };
 }
@@ -1813,11 +1876,11 @@ function buildPhase3Week(weekNum, w, isLastWeek) {
 const WEEKS = [
   {
     weekNum: 3,
-    phase: 'Phase 0 - 感知周',
-    note: '本周训练量刻意偏低，目标是建立发力感知和习惯，不是突破极限',
+    phase: 'Phase 0 - 基础激活期 (Week 3/6 · 🌱 感知)',
+    note: 'Phase 0 第 1 周 · 本周训练量刻意偏低,目标是建立发力感知和习惯,不是突破极限。重点动作: 高位下拉/划船时主动下沉肩胛。',
     days: [
       {
-        dayName: '周一', dayType: 'training', title: '感知训练 A · 肩胛与上肢',
+        dayName: '周一', dayType: 'training', title: 'Week 3 周一 · 感知训练 A (肩胛与上肢)',
         groups: [{
           title: '主训练',
           description: '专注感知目标肌群',
@@ -1831,9 +1894,9 @@ const WEEKS = [
           ]
         }]
       },
-      { dayName: '周二', dayType: 'recovery', title: '主动恢复', description: '晨间重置完整版 + 户外散步 20-30 分钟。有意识挺胸、步态练习' },
+      { dayName: '周二', dayType: 'recovery', title: 'Week 3 周二 · 主动恢复', description: '晨间重置完整版 + 户外散步 20-30 分钟。有意识挺胸、步态练习' },
       {
-        dayName: '周三', dayType: 'training', title: '感知训练 B · 下肢与核心',
+        dayName: '周三', dayType: 'training', title: 'Week 3 周三 · 感知训练 B (下肢与核心)',
         groups: [{
           title: '主训练',
           description: '建立髋铰链 + 足踝感知',
@@ -1848,9 +1911,9 @@ const WEEKS = [
           ]
         }]
       },
-      { dayName: '周四', dayType: 'recovery', title: '主动恢复', description: '晨间重置完整版 + 户外散步 20-30 分钟' },
+      { dayName: '周四', dayType: 'recovery', title: 'Week 3 周四 · 主动恢复', description: '晨间重置完整版 + 户外散步 20-30 分钟' },
       {
-        dayName: '周五', dayType: 'training', title: '感知训练 C · 整合',
+        dayName: '周五', dayType: 'training', title: 'Week 3 周五 · 感知训练 C (整合)',
         groups: [{
           title: '主训练',
           description: '巩固模式 + 整合性动作',
@@ -1864,13 +1927,13 @@ const WEEKS = [
           ]
         }]
       },
-      { dayName: '周六', dayType: 'recovery', title: '首次筋膜松解 + 自由活动', description: '完成第一次专业筋膜松解(60 分钟)。前后做评估测试记录。剩余时间完全自由' },
-      { dayName: '周日', dayType: 'rest', title: '完全休息', description: '只做晨间重置和微习惯' }
+      { dayName: '周六', dayType: 'recovery', title: 'Week 3 周六 · 首次筋膜松解 + 自由活动', description: '完成第一次专业筋膜松解(60 分钟)。前后做评估测试记录。剩余时间完全自由' },
+      { dayName: '周日', dayType: 'rest', title: 'Week 3 周日 · 完全休息', description: '只做晨间重置和微习惯' }
     ]
   },
   buildActivationWeek(4, { rdl: 35, gobletSquat: 12, splitSquat: '自重', singleRdl: '自重', pulldownReverse: 45, seatedRow: 35, dbRow: 13, dbBench: 10, dbShoulderPress: 10, ytw: 1, farmerWalk: 12, suitcaseWalk: 10, assistedPullup: 35 }, false),
   buildActivationWeek(5, { rdl: 40, gobletSquat: 15, splitSquat: '各 5 kg', singleRdl: '5 kg', pulldownReverse: 50, seatedRow: 40, dbRow: 15, dbBench: 12, dbShoulderPress: 12, ytw: 1, farmerWalk: 14, suitcaseWalk: 12, assistedPullup: 32 }, false),
-  buildActivationWeek(6, { rdl: 45, gobletSquat: 17, splitSquat: '各 5 kg', singleRdl: '5 kg', pulldownReverse: 50, seatedRow: 40, dbRow: 15, dbBench: 12, dbShoulderPress: 13, ytw: 2, farmerWalk: 14, suitcaseWalk: 12, assistedPullup: 30 }, true),
+  buildActivationWeek(6, { rdl: 45, gobletSquat: 17, splitSquat: '各 7 kg', singleRdl: '7 kg', pulldownReverse: 55, seatedRow: 45, dbRow: 17, dbBench: 14, dbShoulderPress: 14, ytw: 2, farmerWalk: 16, suitcaseWalk: 14, assistedPullup: 30 }, true),
   
   // ========== Phase 1: Week 7-10 ==========
   buildPhase1Week(7, { rdl: 50, gobletSquat: 20, splitSquat: '各 7 kg', singleRdl: '7 kg', pulldownReverse: 55, seatedRow: 45, dbRow: 17, dbBench: 14, dbShoulderPress: 14, ytw: 2, farmerWalk: 16, suitcaseWalk: 14, bandPullup: '粗弹力带' }, false),
@@ -2121,6 +2184,227 @@ function dbDelete(storeName, key) {
 }
 
 // ============================================================
+// LocalStorage 主存储层 (绕过 iOS PWA IndexedDB 不稳定问题)
+// ============================================================
+// 关键设计决定:
+// - iOS 17+ PWA 模式下 IndexedDB 在版本更新/缓存清理时会丢数据(已知 bug)
+// - localStorage 明显更稳定,几乎不会因为 PWA 升级丢失
+// - 数据量评估: 每条评论几百字节,1000 条 < 500KB, localStorage 5MB 限额够用很久
+// - IndexedDB 仍用于存放大文件(media)和作为影子备份
+
+const LS_PREFIX = 'pwa_';
+const LS_STORES = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings'];
+
+function lsRead(storeName) {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + storeName);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.error(`lsRead ${storeName} 失败:`, e);
+    return [];
+  }
+}
+
+function lsWrite(storeName, list) {
+  try {
+    localStorage.setItem(LS_PREFIX + storeName, JSON.stringify(list));
+    return true;
+  } catch (e) {
+    console.error(`lsWrite ${storeName} 失败:`, e);
+    alert(`⚠ localStorage 写入失败: ${e.message}\n\n可能存储已满,建议立即导出 JSON 备份`);
+    return false;
+  }
+}
+
+function lsNextId(storeName) {
+  const key = LS_PREFIX + 'nextId_' + storeName;
+  const cur = parseInt(localStorage.getItem(key) || '0', 10) + 1;
+  localStorage.setItem(key, String(cur));
+  return cur;
+}
+
+// 启动时迁移: 如果 IDB 有数据但 LS 没有,迁移过来(从老版本升级到 v8.3 的兼容)
+async function migrateFromIDB() {
+  let migrated = 0;
+  const summary = [];
+  for (const store of LS_STORES) {
+    try {
+      const ls = lsRead(store);
+      if (ls.length > 0) continue;
+      const idbData = await _idbGetAll(store);
+      if (idbData && idbData.length > 0) {
+        lsWrite(store, idbData);
+        // 维护 nextId
+        const maxId = Math.max(0, ...idbData.map(x => parseInt(x.id) || 0));
+        if (maxId > 0) {
+          localStorage.setItem(LS_PREFIX + 'nextId_' + store, String(maxId));
+        }
+        migrated += idbData.length;
+        summary.push(`${store}: ${idbData.length}`);
+      }
+    } catch (e) {
+      console.error(`migrate ${store} 失败:`, e);
+    }
+  }
+  return { migrated, summary };
+}
+
+// ============================================================
+// 数据访问路由层
+// ============================================================
+// 关键: 所有调用 dbXxx 的地方实际上路由到 localStorage(对 LS_STORES)
+// 或 IndexedDB(对 media 等大文件)
+// 这是为了绕过 iOS PWA IndexedDB 不稳定问题
+
+function _isLSStore(storeName) { return LS_STORES.indexOf(storeName) >= 0; }
+
+// 保留原始 IDB 函数(用于 media 等大数据,以及 ls 函数内部影子写入)
+function _idbAdd(storeName, data) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).add(data);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function _idbPut(storeName, data) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).put(data);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function _idbGet(storeName, key) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function _idbGetAll(storeName) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function _idbGetByIndex(storeName, indexName, value) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).index(indexName).getAll(value);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function _idbDelete(storeName, key) {
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 路由函数 (原 dbXxx 调用方不需要改动)
+async function dbAdd(storeName, data) {
+  if (_isLSStore(storeName)) return _lsAdd(storeName, data);
+  return _idbAdd(storeName, data);
+}
+async function dbPut(storeName, data) {
+  if (_isLSStore(storeName)) return _lsPut(storeName, data);
+  return _idbPut(storeName, data);
+}
+async function dbGet(storeName, key) {
+  if (_isLSStore(storeName)) return _lsGet(storeName, key);
+  return _idbGet(storeName, key);
+}
+async function dbGetAll(storeName) {
+  if (_isLSStore(storeName)) return _lsGetAll(storeName);
+  return _idbGetAll(storeName);
+}
+async function dbGetByIndex(storeName, indexName, value) {
+  if (_isLSStore(storeName)) return _lsGetByIndex(storeName, indexName, value);
+  return _idbGetByIndex(storeName, indexName, value);
+}
+async function dbDelete(storeName, key) {
+  if (_isLSStore(storeName)) return _lsDelete(storeName, key);
+  return _idbDelete(storeName, key);
+}
+
+// ============================================================
+// LocalStorage 实际操作 (所有 LS_STORES 数据走这里)
+// ============================================================
+
+async function _lsAdd(storeName, data) {
+  const list = lsRead(storeName);
+  const item = { ...data };
+  if (item.id === undefined) item.id = lsNextId(storeName);
+  list.push(item);
+  lsWrite(storeName, list);
+  // 影子写 IDB
+  try { await _idbAdd(storeName, item); } catch (e) { /* 容错: IDB 失败不影响 */ }
+  return item.id;
+}
+
+async function _lsPut(storeName, data) {
+  const list = lsRead(storeName);
+  let keyField;
+  if (storeName === 'dailyHabits') keyField = 'date';
+  else if (storeName === 'settings') keyField = 'key';
+  else keyField = 'id';
+  const key = data[keyField];
+  
+  const idx = list.findIndex(x => x[keyField] === key);
+  if (idx >= 0) list[idx] = data;
+  else list.push(data);
+  lsWrite(storeName, list);
+  
+  try { await _idbPut(storeName, data); } catch (e) { /* 容错 */ }
+  return key;
+}
+
+async function _lsGet(storeName, key) {
+  const list = lsRead(storeName);
+  let keyField;
+  if (storeName === 'dailyHabits') keyField = 'date';
+  else if (storeName === 'settings') keyField = 'key';
+  else keyField = 'id';
+  return list.find(x => x[keyField] === key);
+}
+
+async function _lsGetAll(storeName) {
+  return lsRead(storeName);
+}
+
+async function _lsGetByIndex(storeName, indexName, value) {
+  const list = lsRead(storeName);
+  return list.filter(x => x[indexName] === value);
+}
+
+async function _lsDelete(storeName, key) {
+  const list = lsRead(storeName);
+  let keyField;
+  if (storeName === 'dailyHabits') keyField = 'date';
+  else if (storeName === 'settings') keyField = 'key';
+  else keyField = 'id';
+  const idx = list.findIndex(x => x[keyField] === key);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+    lsWrite(storeName, list);
+  }
+  try { await _idbDelete(storeName, key); } catch (e) { /* 容错 */ }
+}
+
+// ============================================================
 // 工具函数
 // ============================================================
 function todayStr() {
@@ -2148,8 +2432,9 @@ function escHtml(str) {
 
 async function getCurrentWeekDay() {
   const startDate = await getSetting('startDate');
-  // 没设 startDate 时,假设"今天 = Week 3 周一"作为合理默认
   if (!startDate) {
+    // 防御性兜底: 理论上 ensureStartDate() 在启动时已经写入,不会走到这里
+    console.warn('getCurrentWeekDay: startDate 未设置,使用紧急 fallback');
     const today = new Date();
     const dayOfWeek = today.getDay();
     const dayIdx = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
@@ -2240,11 +2525,10 @@ function isViewingToday() {
 // 根据任意日期计算 weekNum 和 dayIdx
 async function getWeekDayForDate(dateStr) {
   const startDate = await getSetting('startDate');
-  // 没设 startDate 时,假设"今天 = Week 3 周一"作为锚点,仍然计算正确的相对偏移
-  // 这样切换到不同日期时训练内容会正确变化(尽管 week 映射可能不准)
   let effectiveStart;
   if (!startDate) {
-    // 用今天推算:找到本周的周一作为虚拟 startDate
+    // 防御性兜底: 理论上 ensureStartDate() 在启动时已经写入
+    console.warn('getWeekDayForDate: startDate 未设置,使用紧急 fallback');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const dayOfWeek = today.getDay();
@@ -2458,7 +2742,24 @@ async function renderExerciseGroup(group, logs, readonly = false) {
   for (const ex of group.exercises) {
     const log = logs.find(l => l.exerciseId === ex.id);
     const done = log && log.completed;
-    const noteCount = (await dbGetByIndex('exerciseNotes', 'exerciseId', ex.id)).length;
+    const allNotes = await dbGetByIndex('exerciseNotes', 'exerciseId', ex.id);
+    const noteCount = allNotes.length;
+    
+    // 找到最近一条记录摘要(用于在卡片上直接展示)
+    let lastNotePreview = '';
+    if (noteCount > 0) {
+      const sorted = [...allNotes].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const latest = sorted[0];
+      const dateOnly = fmtDate(latest.createdAt);
+      // 提取文本前 60 字
+      const previewText = (latest.text || '').replace(/\n+/g, ' / ').slice(0, 60);
+      const ellipsis = (latest.text || '').length > 60 ? '...' : '';
+      lastNotePreview = `
+        <div class="last-note-preview">
+          <span class="last-note-date">📌 ${dateOnly}</span>
+          <span class="last-note-text">${escHtml(previewText)}${ellipsis}</span>
+        </div>`;
+    }
     
     html += `
       <div class="exercise-card${done ? ' done' : ''}">
@@ -2471,6 +2772,7 @@ async function renderExerciseGroup(group, logs, readonly = false) {
               ${ex.weight ? `<span>⚖ ${escHtml(ex.weight)}</span>` : ''}
             </div>
             ${ex.tip ? `<div class="exercise-tip">${escHtml(ex.tip)}</div>` : ''}
+            ${lastNotePreview}
             <div class="exercise-actions">
               <button class="action-btn ${noteCount > 0 ? 'has-content' : ''}" data-action="note" data-exid="${ex.id}" data-exname="${escHtml(ex.name)}">
                 📝 记录
@@ -2926,6 +3228,7 @@ async function renderSettings() {
       <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">训练开始日期 (Week 3 周一)</div>
       <input type="date" id="start-date" value="${startDate}" onchange="updateStartDate(this.value)">
       <div class="text-small text-dim" style="margin-top: 6px;">设置后，App 会根据今天的日期自动判断当前是第几周第几天</div>
+      <div id="current-week-display" style="margin-top: 12px; padding: 10px; background: rgba(212, 175, 55, 0.08); border-left: 2px solid var(--accent-dim); border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.6;"></div>
     </div>
     <div class="spacer-lg"></div>
     <div class="section-title"><span>数据导出</span></div>
@@ -2966,11 +3269,32 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v8.0<br>
+      体态修复训练手册 · v8.5<br>
       「完成 80% > 完美 50%」
     </div>`;
   
   view.innerHTML = html;
+  
+  // 异步填充当前周次展示
+  const display = document.getElementById('current-week-display');
+  if (display) {
+    if (!startDate) {
+      display.innerHTML = '⚠ 训练开始日期未设置, 进入今日训练页面后系统会自动设为本周一';
+    } else {
+      const wd = await getCurrentWeekDay();
+      const phaseName = wd.weekNum >= 15 ? 'Phase 3 目标期' 
+                      : wd.weekNum >= 11 ? 'Phase 2 渐进期'
+                      : wd.weekNum >= 7 ? 'Phase 1 对称巩固期'
+                      : wd.weekNum >= 3 ? 'Phase 0 基础激活期'
+                      : '尚未开始';
+      const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
+      display.innerHTML = `
+        <div><strong>📅 今天:</strong> Week ${wd.weekNum} · ${dayNames[wd.dayIdx]}</div>
+        <div style="margin-top: 4px;"><strong>📊 当前阶段:</strong> ${phaseName}</div>
+        <div style="margin-top: 4px; color: var(--text-2);">开始日期 ${startDate} 起,共训练 ${Math.floor((new Date() - new Date(startDate)) / (24*60*60*1000))} 天</div>
+      `;
+    }
+  }
 }
 
 async function updateStartDate(date) {
@@ -3178,17 +3502,42 @@ async function saveNote() {
     showToast('请输入内容或上传媒体');
     return;
   }
-  const noteId = await dbAdd('exerciseNotes', {
+  
+  const noteData = {
     exerciseId: currentNoteExerciseId,
     text,
     createdAt: new Date().toISOString()
-  });
-  for (const m of currentNoteMedia) {
-    await dbAdd('media', {
-      noteId, type: m.type, blob: m.blob, filename: m.blob.name || `${m.type}-${Date.now()}`
-    });
+  };
+  
+  let noteId = null;
+  try {
+    // dbAdd 现在路由到 localStorage 主存储 + IDB 影子写入
+    noteId = await dbAdd('exerciseNotes', noteData);
+    
+    // 立即回读验证
+    const all = await dbGetAll('exerciseNotes');
+    const found = all.find(n => n.id === noteId);
+    if (!found || found.text !== text) {
+      throw new Error('回读验证失败');
+    }
+  } catch (e) {
+    console.error('保存评论失败:', e);
+    alert(`⚠ 保存失败: ${e.message}\n\n请截图反馈`);
+    return;
   }
-  showToast('已保存');
+  
+  // 保存媒体到 IDB(媒体仍走 IDB,localStorage 装不下大文件)
+  for (const m of currentNoteMedia) {
+    try {
+      await _idbAdd('media', {
+        noteId, type: m.type, blob: m.blob, filename: m.blob.name || `${m.type}-${Date.now()}`
+      });
+    } catch (e) {
+      console.error('媒体保存失败:', e);
+    }
+  }
+  
+  showToast(`✓ 已保存 (评论 #${noteId})`);
   closeNoteModal();
   renderToday();
 }
@@ -3316,7 +3665,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: '7.0',
+    appVersion: "8.5",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -3333,6 +3682,48 @@ async function exportJSON() {
     });
     data.media.push({ id: m.id, noteId: m.noteId, type: m.type, filename: m.filename, dataUrl });
   }
+  
+  // 关键容错: 合并 localStorage 备份中 IDB 没有的评论
+  let recoveredFromBackup = 0;
+  try {
+    const backups = JSON.parse(localStorage.getItem('noteBackup') || '[]');
+    if (backups.length > 0) {
+      const idbSigs = new Set(data.exerciseNotes.map(n => `${n.exerciseId}|${n.createdAt}|${n.text}`));
+      for (const b of backups) {
+        const sig = `${b.exerciseId}|${b.createdAt}|${b.text}`;
+        if (!idbSigs.has(sig)) {
+          data.exerciseNotes.push({
+            exerciseId: b.exerciseId,
+            text: b.text,
+            createdAt: b.createdAt,
+            _source: 'localStorage_backup'
+          });
+          recoveredFromBackup++;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('合并 localStorage 备份失败:', e);
+  }
+  
+  // 导出前显示预览
+  let preview = `【导出数据预览】\n\n` +
+    `• 训练记录 (勾选完成): ${data.workoutLogs.length} 条\n` +
+    `• 动作记录 (评论 + 媒体引用): ${data.exerciseNotes.length} 条\n`;
+  if (recoveredFromBackup > 0) {
+    preview += `  其中从 localStorage 备份补回: ${recoveredFromBackup} 条\n`;
+  }
+  preview += `• 习惯打卡: ${data.dailyHabits.length} 天\n` +
+    `• 体测数据: ${data.bodyMetrics.length} 条\n` +
+    `• 设置: ${data.settings.length} 项\n` +
+    `• 媒体文件 (照片/视频): ${data.media.length} 个\n\n` +
+    `点击「确定」下载 JSON 文件\n` +
+    `点击「取消」放弃下载`;
+  
+  if (!confirm(preview)) {
+    return;
+  }
+  
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3340,7 +3731,7 @@ async function exportJSON() {
   a.download = `posture-recovery-${todayStr()}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  showToast('已导出');
+  showToast(`✓ 已导出 ${data.exerciseNotes.length} 条评论 + 全量数据`);
 }
 
 async function generateAIReport() {
@@ -3455,12 +3846,26 @@ async function copyAIReport() {
 async function importJSON(event) {
   const file = event.target.files[0];
   if (!file) return;
-  if (!confirm('导入将覆盖现有数据，继续?')) return;
+  
+  // 询问导入模式
+  const replaceMode = confirm(
+    '【导入数据】\n\n' +
+    '点击「确定」 → 覆盖模式: 清空当前数据后导入(危险!会丢失现有数据)\n' +
+    '点击「取消」 → 合并模式: 保留现有数据,把导入的新数据合并进来 (推荐)'
+  );
+  
+  if (replaceMode) {
+    // 二次确认覆盖
+    if (!confirm('⚠ 覆盖模式会清空当前所有数据\n\n确定继续?建议先点「数据诊断」备份当前数据')) {
+      event.target.value = '';
+      return;
+    }
+  }
+  
   const text = await file.text();
   try {
     const data = JSON.parse(text);
     
-    // 读取统计,让用户看到导入的内容
     const stats = {
       workoutLogs: (data.workoutLogs || []).length,
       exerciseNotes: (data.exerciseNotes || []).length,
@@ -3470,82 +3875,128 @@ async function importJSON(event) {
       media: (data.media || []).length
     };
     
-    const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'media'];
-    for (const store of stores) {
-      const all = await dbGetAll(store);
-      for (const item of all) {
-        const key = store === 'dailyHabits' ? item.date : (store === 'settings' ? item.key : item.id);
-        await dbDelete(store, key);
+    // 覆盖模式: 先清空
+    if (replaceMode) {
+      const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'media'];
+      for (const store of stores) {
+        const all = await dbGetAll(store);
+        for (const item of all) {
+          const key = store === 'dailyHabits' ? item.date : (store === 'settings' ? item.key : item.id);
+          await dbDelete(store, key);
+        }
       }
     }
     
-    // 导入时记录错误
-    const errors = [];
-    let logsCount = 0, notesCount = 0, habitsCount = 0, metricsCount = 0;
+    // 收集 import 前现有数据(用于合并去重)
+    const existingLogs = replaceMode ? [] : await dbGetAll('workoutLogs');
+    const existingNotes = replaceMode ? [] : await dbGetAll('exerciseNotes');
+    const existingMetrics = replaceMode ? [] : await dbGetAll('bodyMetrics');
     
+    const errors = [];
+    let logsCount = 0, notesCount = 0, habitsCount = 0, metricsCount = 0, settingsCount = 0, mediaCount = 0;
+    let logsSkipped = 0, notesSkipped = 0, metricsSkipped = 0;
+    
+    // workoutLogs 去重: 同 date + exerciseId 视为重复
     for (const log of (data.workoutLogs || [])) {
       try {
-        // 兼容:如果没有 id 字段,让 IDB 自增
+        const isDup = !replaceMode && existingLogs.some(e => e.date === log.date && e.exerciseId === log.exerciseId);
+        if (isDup) { logsSkipped++; continue; }
         const toStore = { ...log };
-        if (toStore.id === undefined) delete toStore.id;
-        await dbPut('workoutLogs', toStore);
+        delete toStore.id; // 让 IDB 自增 id 避免冲突
+        await dbAdd('workoutLogs', toStore);
         logsCount++;
       } catch (e) { errors.push(`workoutLog: ${e.message}`); }
     }
     
+    // exerciseNotes 去重: 同 exerciseId + createdAt + text 视为重复
     for (const note of (data.exerciseNotes || [])) {
       try {
+        const isDup = !replaceMode && existingNotes.some(e => 
+          e.exerciseId === note.exerciseId && 
+          e.createdAt === note.createdAt && 
+          e.text === note.text
+        );
+        if (isDup) { notesSkipped++; continue; }
         const toStore = { ...note };
-        if (toStore.id === undefined) delete toStore.id;
-        await dbPut('exerciseNotes', toStore);
+        delete toStore.id;
+        await dbAdd('exerciseNotes', toStore);
         notesCount++;
       } catch (e) { errors.push(`exerciseNote: ${e.message}`); }
     }
     
+    // dailyHabits: 用 date 做 key,合并模式下保留现有(避免覆盖你今天已经打的卡)
     for (const habit of (data.dailyHabits || [])) {
       try {
-        // dailyHabits 用 date 作为 keyPath,必须有
         if (!habit.date) { errors.push(`habit 缺少 date 字段`); continue; }
-        await dbPut('dailyHabits', habit);
+        if (!replaceMode) {
+          const existing = await dbGet('dailyHabits', habit.date);
+          if (existing) {
+            // 合并 habits 和 counters: 任意一边为 true 就保留
+            const merged = {
+              date: habit.date,
+              habits: { ...habit.habits, ...existing.habits },
+              counters: {}
+            };
+            const allCounterKeys = new Set([...Object.keys(habit.counters || {}), ...Object.keys(existing.counters || {})]);
+            for (const k of allCounterKeys) {
+              merged.counters[k] = Math.max(habit.counters?.[k] || 0, existing.counters?.[k] || 0);
+            }
+            await dbPut('dailyHabits', merged);
+          } else {
+            await dbPut('dailyHabits', habit);
+          }
+        } else {
+          await dbPut('dailyHabits', habit);
+        }
         habitsCount++;
       } catch (e) { errors.push(`habit: ${e.message}`); }
     }
     
+    // bodyMetrics 去重: 同 metricId + date 视为重复(同一天同一指标只保留一条)
     for (const metric of (data.bodyMetrics || [])) {
       try {
+        const isDup = !replaceMode && existingMetrics.some(e => 
+          e.metricId === metric.metricId && e.date === metric.date
+        );
+        if (isDup) { metricsSkipped++; continue; }
         const toStore = { ...metric };
-        if (toStore.id === undefined) delete toStore.id;
-        await dbPut('bodyMetrics', toStore);
+        delete toStore.id;
+        await dbAdd('bodyMetrics', toStore);
         metricsCount++;
       } catch (e) { errors.push(`metric: ${e.message}`); }
     }
     
+    // settings: 默认覆盖(同名 key 用导入的值)
     for (const setting of (data.settings || [])) {
       try {
         if (!setting.key) { errors.push(`setting 缺少 key 字段`); continue; }
         await dbPut('settings', setting);
+        settingsCount++;
       } catch (e) { errors.push(`setting: ${e.message}`); }
     }
     
+    // media: 全部加入(图片/视频通常不重复)
     for (const m of (data.media || [])) {
       try {
         if (!m.dataUrl) { errors.push(`media 缺少 dataUrl`); continue; }
         const res = await fetch(m.dataUrl);
         const blob = await res.blob();
         const toStore = { noteId: m.noteId, type: m.type, filename: m.filename, blob };
-        if (m.id !== undefined) toStore.id = m.id;
-        await dbPut('media', toStore);
+        // 注意: 不传 id, 让 IDB 自增, 避免和现有 media 的 id 冲突
+        await dbAdd('media', toStore);
+        mediaCount++;
       } catch (e) { errors.push(`media: ${e.message}`); }
     }
     
-    // 显示导入结果
-    let resultMsg = `导入完成:\n`;
-    resultMsg += `• 训练记录: ${logsCount} / ${stats.workoutLogs}\n`;
-    resultMsg += `• 动作记录: ${notesCount} / ${stats.exerciseNotes}\n`;
-    resultMsg += `• 习惯打卡: ${habitsCount} / ${stats.dailyHabits}\n`;
-    resultMsg += `• 体测数据: ${metricsCount} / ${stats.bodyMetrics}\n`;
+    let resultMsg = `${replaceMode ? '✓ 覆盖式' : '✓ 合并式'}导入完成:\n\n`;
+    resultMsg += `• 训练记录: 新增 ${logsCount}${logsSkipped ? ' / 跳过重复 ' + logsSkipped : ''} (来源 ${stats.workoutLogs})\n`;
+    resultMsg += `• 动作记录: 新增 ${notesCount}${notesSkipped ? ' / 跳过重复 ' + notesSkipped : ''} (来源 ${stats.exerciseNotes})\n`;
+    resultMsg += `• 习惯打卡: ${habitsCount} (来源 ${stats.dailyHabits})\n`;
+    resultMsg += `• 体测数据: 新增 ${metricsCount}${metricsSkipped ? ' / 跳过重复 ' + metricsSkipped : ''} (来源 ${stats.bodyMetrics})\n`;
+    resultMsg += `• 设置: ${settingsCount} (来源 ${stats.settings})\n`;
+    resultMsg += `• 媒体文件: ${mediaCount} (来源 ${stats.media})\n`;
     if (errors.length > 0) {
-      resultMsg += `\n错误 ${errors.length} 条:\n${errors.slice(0, 5).join('\n')}`;
+      resultMsg += `\n⚠ 错误 ${errors.length} 条:\n${errors.slice(0, 5).join('\n')}`;
     }
     alert(resultMsg);
     setTimeout(() => location.reload(), 500);
@@ -3565,40 +4016,91 @@ async function diagnoseData() {
     const media = await dbGetAll('media');
     
     let msg = `【当前数据库内容】\n\n`;
-    msg += `训练记录 (workoutLogs): ${logs.length} 条\n`;
+    msg += `📋 训练记录 (workoutLogs): ${logs.length} 条\n`;
     if (logs.length > 0) {
       const dates = [...new Set(logs.map(l => l.date))].sort();
       msg += `  日期范围: ${dates[0]} ~ ${dates[dates.length - 1]}\n`;
       const completedCount = logs.filter(l => l.completed).length;
       msg += `  已完成: ${completedCount}\n`;
-      // 样本
-      msg += `  样本字段: ${Object.keys(logs[0]).join(', ')}\n`;
-      // 检查 exerciseId 是否匹配当前动作库
       const allExIds = new Set(getAllExercises().map(e => e.id));
       const unknownIds = [...new Set(logs.map(l => l.exerciseId))].filter(id => !allExIds.has(id));
       if (unknownIds.length > 0) {
-        msg += `  ⚠ 发现 ${unknownIds.length} 个无法匹配的动作 ID,样本: ${unknownIds.slice(0,3).join(', ')}\n`;
+        msg += `  ⚠ 发现 ${unknownIds.length} 个无法匹配的动作 ID(可能来自旧版本):\n  样本: ${unknownIds.slice(0,3).join(', ')}\n`;
       }
     }
-    msg += `\n动作记录 (exerciseNotes): ${notes.length} 条\n`;
+    
+    msg += `\n💬 动作评论 (exerciseNotes): ${notes.length} 条\n`;
     if (notes.length > 0) {
-      msg += `  样本字段: ${Object.keys(notes[0]).join(', ')}\n`;
+      const sortedNotes = [...notes].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      msg += `  最新 3 条:\n`;
+      const allEx = getAllExercises();
+      for (const n of sortedNotes.slice(0, 3)) {
+        const ex = allEx.find(e => e.id === n.exerciseId);
+        const exName = ex ? ex.name : `[未知:${n.exerciseId}]`;
+        const preview = (n.text || '').slice(0, 30).replace(/\n/g, ' ');
+        msg += `  • [${fmtDate(n.createdAt)}] ${exName}: ${preview}${(n.text||'').length > 30 ? '...' : ''}\n`;
+      }
+      // 按动作分组统计
+      const byEx = {};
+      notes.forEach(n => byEx[n.exerciseId] = (byEx[n.exerciseId] || 0) + 1);
+      const topEx = Object.entries(byEx).sort((a,b) => b[1]-a[1]).slice(0, 5);
+      msg += `  评论最多的动作:\n`;
+      for (const [exId, count] of topEx) {
+        const ex = allEx.find(e => e.id === exId);
+        const exName = ex ? ex.name : `[未知:${exId}]`;
+        msg += `    ${exName}: ${count} 条\n`;
+      }
     }
-    msg += `\n习惯打卡 (dailyHabits): ${habits.length} 天\n`;
+    
+    msg += `\n📅 习惯打卡 (dailyHabits): ${habits.length} 天\n`;
     if (habits.length > 0) {
       const dates = habits.map(h => h.date).sort();
       msg += `  日期范围: ${dates[0]} ~ ${dates[dates.length - 1]}\n`;
     }
-    msg += `\n体测数据 (bodyMetrics): ${metrics.length} 条\n`;
+    
+    msg += `\n📊 体测数据 (bodyMetrics): ${metrics.length} 条\n`;
     if (metrics.length > 0) {
       const dates = [...new Set(metrics.map(m => m.date))].sort();
       msg += `  日期范围: ${dates[0]} ~ ${dates[dates.length - 1]}\n`;
       const metricIds = [...new Set(metrics.map(m => m.metricId))];
-      msg += `  指标类型: ${metricIds.join(', ')}\n`;
+      msg += `  指标类型: ${metricIds.length} 种\n`;
     }
-    msg += `\n设置 (settings): ${settings.length} 项\n`;
-    settings.forEach(s => msg += `  ${s.key}: ${s.value}\n`);
-    msg += `\n媒体文件 (media): ${media.length} 个`;
+    
+    msg += `\n⚙️ 设置 (settings): ${settings.length} 项\n`;
+    settings.forEach(s => msg += `  ${s.key}: ${typeof s.value === 'object' ? JSON.stringify(s.value).slice(0, 40) : s.value}\n`);
+    
+    msg += `\n📷 媒体文件 (media): ${media.length} 个\n`;
+    if (media.length > 0) {
+      const types = {};
+      media.forEach(m => types[m.type] = (types[m.type] || 0) + 1);
+      Object.entries(types).forEach(([t, c]) => msg += `  ${t}: ${c} 个\n`);
+    }
+    
+    msg += `\n💡 数据库名: PostureRecoveryApp`;
+    msg += `\n💡 当前 URL: ${window.location.href}`;
+    
+    // localStorage 备份诊断
+    try {
+      const backups = JSON.parse(localStorage.getItem('noteBackup') || '[]');
+      msg += `\n\n🔒 localStorage 备份: ${backups.length} 条`;
+      if (backups.length > 0) {
+        const idbSavedCount = backups.filter(b => b.idbSaved).length;
+        const idbFailedCount = backups.length - idbSavedCount;
+        msg += `\n  其中 IDB 写入成功: ${idbSavedCount}`;
+        if (idbFailedCount > 0) {
+          msg += `\n  ⚠ IDB 写入失败但已备份: ${idbFailedCount}`;
+        }
+        // 对比 IDB 中实际存在的评论
+        const idbNotes = notes;
+        const idbSigs = new Set(idbNotes.map(n => `${n.exerciseId}|${n.createdAt}|${n.text}`));
+        const lostFromIDB = backups.filter(b => !idbSigs.has(`${b.exerciseId}|${b.createdAt}|${b.text}`)).length;
+        if (lostFromIDB > 0) {
+          msg += `\n  ⚠ 备份中但 IDB 已丢失: ${lostFromIDB} 条 (启动时会自动恢复)`;
+        }
+      }
+    } catch (e) {
+      msg += `\n\n🔒 localStorage 备份: 读取失败 (${e.message})`;
+    }
     
     alert(msg);
   } catch (e) {
@@ -3742,12 +4244,103 @@ async function handleURLImport() {
 }
 
 // ============================================================
+// 兼容: 旧版 v8.2 的 noteBackup localStorage 数据
+// ============================================================
+async function migrateFromOldNoteBackup() {
+  try {
+    const backups = JSON.parse(localStorage.getItem('noteBackup') || '[]');
+    if (backups.length === 0) return 0;
+    
+    const currentNotes = await dbGetAll('exerciseNotes');
+    const sigs = new Set(currentNotes.map(n => `${n.exerciseId}|${n.createdAt}|${n.text}`));
+    
+    let migrated = 0;
+    for (const b of backups) {
+      const sig = `${b.exerciseId}|${b.createdAt}|${b.text}`;
+      if (!sigs.has(sig)) {
+        await dbAdd('exerciseNotes', {
+          exerciseId: b.exerciseId,
+          text: b.text,
+          createdAt: b.createdAt
+        });
+        migrated++;
+      }
+    }
+    return migrated;
+  } catch (e) {
+    console.error('迁移老版 noteBackup 失败:', e);
+    return 0;
+  }
+}
+
+// ============================================================
+// 确保 startDate 被持久化(关键修复: 之前没设 startDate 会导致每周都计算为 Week 3)
+// ============================================================
+// 设计: startDate 是 Week 3 的周一(基准点)
+// 用户场景: 本周一应当作 Week 4 起点 → startDate = 上周一
+async function ensureStartDate() {
+  const existing = await getSetting('startDate');
+  if (existing) return { firstTime: false, startDate: existing };
+  
+  // 第一次启动: 把"上周一"持久化为 startDate(这样本周一就是 Week 4)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dayOfWeek = today.getDay();
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const thisMonday = new Date(today);
+  thisMonday.setDate(today.getDate() - daysToMonday);
+  // 再往前推 7 天 = 上周一 = Week 3 周一基准
+  const lastMonday = new Date(thisMonday);
+  lastMonday.setDate(thisMonday.getDate() - 7);
+  const lastMondayStr = fmtDate(lastMonday);
+  
+  await setSetting('startDate', lastMondayStr);
+  return { firstTime: true, startDate: lastMondayStr };
+}
+
+// ============================================================
 // 启动
 // ============================================================
 (async () => {
   await openDB();
+  
+  // 1. 从 IndexedDB 迁移到 localStorage(从 v8.2 及之前升级的兼容)
+  const idbMigration = await migrateFromIDB();
+  
+  // 2. 从老版 noteBackup localStorage 迁移
+  const oldBackupCount = await migrateFromOldNoteBackup();
+  
+  // 3. 关键: 确保 startDate 已持久化(修复"每周都是 Week 3"的 bug)
+  const sd = await ensureStartDate();
+  
+  if (idbMigration.migrated > 0 || oldBackupCount > 0) {
+    const parts = [];
+    if (idbMigration.migrated > 0) {
+      parts.push(`从 IndexedDB 迁移: ${idbMigration.summary.join(', ')}`);
+    }
+    if (oldBackupCount > 0) {
+      parts.push(`从 v8.2 备份恢复: ${oldBackupCount} 条评论`);
+    }
+    setTimeout(() => {
+      alert(
+        `🔄 数据迁移完成\n\n${parts.join('\n')}\n\n` +
+        `数据已转移到 localStorage 主存储,从此不再受 iOS PWA IndexedDB 不稳定影响。\n\n` +
+        `建议立即去【设置】→【导出 JSON】做一份完整备份。`
+      );
+    }, 800);
+  } else if (sd.firstTime) {
+    // 第一次启动 (没迁移到的全新用户),提醒用户确认开始日期
+    setTimeout(() => {
+      alert(
+        `👋 欢迎使用!\n\n` +
+        `已自动将上周一 (${sd.startDate}) 设为 Week 3 起点。\n` +
+        `这意味着本周一开始进入 Week 4。\n\n` +
+        `如需修改,请到【设置】→【训练开始日期】调整。`
+      );
+    }, 800);
+  }
+  
   await renderToday();
-  // 处理 URL 参数导入(在视图渲染后,以便弹窗可见)
   setTimeout(() => handleURLImport(), 300);
 })();
 </script>
