@@ -1034,6 +1034,18 @@ main {
   font-family: ui-monospace, "SF Mono", monospace;
 }
 
+.note-origin-tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  background: rgba(212, 175, 55, 0.12);
+  color: var(--accent);
+  border-radius: 4px;
+  margin-left: 6px;
+  letter-spacing: 0.05em;
+  font-family: -apple-system, sans-serif;
+}
+
 .note-item-delete {
   font-size: 11px;
   color: var(--text-3);
@@ -2482,6 +2494,58 @@ function getAllExercises() {
 }
 
 // ============================================================
+// 动作语义 key (v8.6 新增)
+// ============================================================
+// 设计:
+// - exerciseId (如 w5-d2-5) 是"位置 id" - 每周每天都不同
+// - exerciseKey (如 "单腿 RDL") 是"动作语义 id" - 同名动作共享
+// - 用动作 name 作为 key,因为训练计划里同一个动作的渐进版本(自重/5kg/10kg)
+//   都用同名 (name),只有 weight 字段在变
+// - 真正不同的动作(比如"单腿 RDL" vs "单腿 RDL + 哑铃"),会有不同的 name,自动隔离
+//
+// 这样,用户的评论按 name 关联,跨周自然共享同一个动作的训练历史
+
+function exerciseIdToKey(exerciseId) {
+  if (!exerciseId) return null;
+  const all = getAllExercises();
+  const found = all.find(e => e.id === exerciseId);
+  return found ? found.name : null; // 找不到时返回 null
+}
+
+// 拿到某个动作 key 下所有评论(跨周聚合)
+async function getNotesForKey(exerciseKey) {
+  if (!exerciseKey) return [];
+  const all = await dbGetAll('exerciseNotes');
+  return all.filter(n => {
+    // 新评论: 直接匹配 exerciseKey 字段
+    if (n.exerciseKey === exerciseKey) return true;
+    // 老评论 fallback: 用 exerciseId 反查 name
+    if (n.exerciseId && !n.exerciseKey) {
+      const key = exerciseIdToKey(n.exerciseId);
+      return key === exerciseKey;
+    }
+    return false;
+  });
+}
+
+// 启动时一次性: 为所有缺 exerciseKey 的老评论自动回填
+async function backfillExerciseKey() {
+  const all = await dbGetAll('exerciseNotes');
+  let filled = 0;
+  for (const n of all) {
+    if (!n.exerciseKey && n.exerciseId) {
+      const key = exerciseIdToKey(n.exerciseId);
+      if (key) {
+        // dbPut 走 _lsPut 主存储 + IDB 影子
+        await dbPut('exerciseNotes', { ...n, exerciseKey: key });
+        filled++;
+      }
+    }
+  }
+  return filled;
+}
+
+// ============================================================
 // 视图管理
 // ============================================================
 function showView(viewName) {
@@ -2742,7 +2806,8 @@ async function renderExerciseGroup(group, logs, readonly = false) {
   for (const ex of group.exercises) {
     const log = logs.find(l => l.exerciseId === ex.id);
     const done = log && log.completed;
-    const allNotes = await dbGetByIndex('exerciseNotes', 'exerciseId', ex.id);
+    // v8.6: 按动作语义 key 聚合,跨周共享同一个动作的所有评论
+    const allNotes = await getNotesForKey(ex.name);
     const noteCount = allNotes.length;
     
     // 找到最近一条记录摘要(用于在卡片上直接展示)
@@ -3269,7 +3334,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v8.5<br>
+      体态修复训练手册 · v8.6<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -3396,8 +3461,17 @@ async function openNoteModal(exerciseId, exerciseName) {
   
   document.getElementById('note-modal-title').innerHTML = `${escHtml(exerciseName)} <small>动作记录</small>`;
   
-  const notes = await dbGetByIndex('exerciseNotes', 'exerciseId', exerciseId);
+  // v8.6: 按动作语义 key 跨周聚合所有评论
+  const notes = await getNotesForKey(exerciseName);
   notes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  
+  // 计算这是这个动作的多少周共享的评论
+  const allExercises = getAllExercises();
+  const sameNameExercises = allExercises.filter(e => e.name === exerciseName);
+  const weekTags = [...new Set(sameNameExercises.map(e => e.source).filter(s => s && s.startsWith('Week')))];
+  const aggregationNote = weekTags.length > 1 
+    ? `<div style="font-size: 11px; color: var(--text-3); margin-bottom: 8px;">📎 该动作的评论跨 ${weekTags.length} 周聚合显示</div>`
+    : '';
   
   let html = `
     <div class="note-input-area">
@@ -3422,6 +3496,7 @@ async function openNoteModal(exerciseId, exerciseName) {
       <span>历史记录</span>
       <span class="section-title-cn">共 ${notes.length} 条</span>
     </div>
+    ${aggregationNote}
     <div class="note-list" id="note-list">
       ${notes.length === 0 ? '<div class="empty">还没有记录，创建第一条吧</div>' : ''}
     </div>`;
@@ -3446,9 +3521,16 @@ async function openNoteModal(exerciseId, exerciseName) {
       }
       mediaHtml += '</div>';
     }
+    // v8.6: 显示评论的"来源 Week"标签 - 帮用户区分这是哪一周写的
+    let originTag = '';
+    if (note.exerciseId) {
+      // 从 exerciseId 推断来源(e.g. w5-d2-5 → Week 5)
+      const m = note.exerciseId.match(/^w(\d+)-/);
+      if (m) originTag = `<span class="note-origin-tag">Week ${m[1]}</span>`;
+    }
     noteEl.innerHTML = `
       <div class="note-item-header">
-        <div class="note-item-date">${fmtDateTime(note.createdAt)}</div>
+        <div class="note-item-date">${fmtDateTime(note.createdAt)} ${originTag}</div>
         <div class="note-item-delete" onclick="deleteNote(${note.id})">删除</div>
       </div>
       <div class="note-item-text">${escHtml(note.text)}</div>
@@ -3505,6 +3587,7 @@ async function saveNote() {
   
   const noteData = {
     exerciseId: currentNoteExerciseId,
+    exerciseKey: exerciseIdToKey(currentNoteExerciseId), // v8.6: 同时存语义 key
     text,
     createdAt: new Date().toISOString()
   };
@@ -3665,7 +3748,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "8.5",
+    appVersion: "8.6",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -4313,7 +4396,10 @@ async function ensureStartDate() {
   // 3. 关键: 确保 startDate 已持久化(修复"每周都是 Week 3"的 bug)
   const sd = await ensureStartDate();
   
-  if (idbMigration.migrated > 0 || oldBackupCount > 0) {
+  // 4. v8.6: 为所有缺 exerciseKey 的老评论自动回填(让评论跨周聚合)
+  const backfilled = await backfillExerciseKey();
+  
+  if (idbMigration.migrated > 0 || oldBackupCount > 0 || backfilled > 0) {
     const parts = [];
     if (idbMigration.migrated > 0) {
       parts.push(`从 IndexedDB 迁移: ${idbMigration.summary.join(', ')}`);
@@ -4321,11 +4407,13 @@ async function ensureStartDate() {
     if (oldBackupCount > 0) {
       parts.push(`从 v8.2 备份恢复: ${oldBackupCount} 条评论`);
     }
+    if (backfilled > 0) {
+      parts.push(`已为 ${backfilled} 条老评论自动关联动作 (跨周共享)`);
+    }
     setTimeout(() => {
       alert(
-        `🔄 数据迁移完成\n\n${parts.join('\n')}\n\n` +
-        `数据已转移到 localStorage 主存储,从此不再受 iOS PWA IndexedDB 不稳定影响。\n\n` +
-        `建议立即去【设置】→【导出 JSON】做一份完整备份。`
+        `🔄 数据升级完成\n\n${parts.join('\n')}\n\n` +
+        `从 v8.6 起,同名动作的评论会跨周聚合,你的历史记录已自动关联好。`
       );
     }, 800);
   } else if (sd.firstTime) {
