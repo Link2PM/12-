@@ -806,6 +806,143 @@ main {
   color: var(--accent);
 }
 
+/* ====== 今日视图内嵌习惯打卡 ====== */
+.today-habits-section {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.today-habits-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.today-habits-title {
+  font-size: 13px;
+  color: var(--text-2);
+  letter-spacing: 0.1em;
+}
+
+.today-habits-progress {
+  font-size: 12px;
+  color: var(--accent);
+  font-family: 'NotoSerifSC', serif;
+}
+
+.today-habit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.today-habit-chip {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  padding: 8px 4px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: center;
+  position: relative;
+}
+
+.today-habit-chip.checked {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.1), transparent);
+  border-color: var(--accent-dim);
+}
+
+.today-habit-chip.auto-checked {
+  border-color: var(--good);
+  background: linear-gradient(135deg, rgba(107, 142, 90, 0.1), transparent);
+}
+
+.today-habit-chip .chip-icon {
+  font-size: 18px;
+  filter: grayscale(0.5);
+  opacity: 0.6;
+}
+
+.today-habit-chip.checked .chip-icon,
+.today-habit-chip.auto-checked .chip-icon {
+  filter: none;
+  opacity: 1;
+}
+
+.today-habit-chip .chip-name {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 2px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-habit-chip.checked .chip-name {
+  color: var(--text-1);
+}
+
+.today-habit-chip .chip-auto-tag {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 8px;
+  color: var(--good);
+}
+
+.today-habit-counters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.today-counter-item {
+  flex: 1;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.today-counter-label {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.today-counter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.today-counter-btn {
+  width: 26px;
+  height: 26px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-1);
+}
+
+.today-counter-num {
+  min-width: 24px;
+  text-align: center;
+  font-family: 'NotoSerifSC', serif;
+  font-size: 15px;
+  color: var(--accent);
+}
+
 /* ====== Modal ====== */
 .modal-backdrop {
   position: fixed;
@@ -2736,10 +2873,20 @@ async function renderToday() {
 
   const pct = totalEx > 0 ? Math.round(doneEx / totalEx * 100) : 0;
   const progressLabel = isToday ? '今日完成进度' : isPast ? '当日完成情况' : '计划动作数';
+
+  // 获取习惯完成数用于进度显示
+  let habitDoneCount = 0;
+  if (!isFuture) {
+    const dateForHabitProgress = isToday ? todayStr() : dateStr;
+    const habitData = await dbGet('dailyHabits', dateForHabitProgress) || { habits: {} };
+    habitDoneCount = HABITS.toggle.filter(h => habitData.habits[h.id]).length;
+  }
+  const habitSuffix = isFuture ? '' : ` · 习惯 ${habitDoneCount}/${HABITS.toggle.length}`;
+
   html += `
     <div class="progress-summary">
       <div class="progress-summary-text">${progressLabel}</div>
-      <div class="progress-summary-num">${doneEx}<small>/${totalEx} · ${pct}%</small></div>
+      <div class="progress-summary-num">${doneEx}<small>/${totalEx} · ${pct}%${habitSuffix}</small></div>
     </div>`;
 
   const readonly = isFuture;
@@ -2771,7 +2918,61 @@ async function renderToday() {
       <div style="font-size: 13px; color: var(--text-1); line-height: 1.7;">${escHtml(day.description || '')}</div>
     </div>`;
   }
-  
+
+  // ====== 内嵌习惯打卡区域(仅今天和过去日期显示) ======
+  if (!isFuture) {
+    const dateForHabits = isToday ? todayStr() : dateStr;
+    const todayHabits = await dbGet('dailyHabits', dateForHabits) || { date: dateForHabits, habits: {}, counters: {} };
+
+    // 自动检测晨间重置完成状态
+    const morningExIds = PLAN_DATA.morningTemplate.exercises.map(ex => ex.id);
+    const allMorningDone = morningExIds.every(id => logs.find(l => l.exerciseId === id && l.completed));
+    // 如果晨间重置全部完成,自动勾选 h-morning 习惯
+    if (allMorningDone && !todayHabits.habits['h-morning']) {
+      todayHabits.habits['h-morning'] = true;
+      await dbPut('dailyHabits', { ...todayHabits, date: dateForHabits });
+    }
+
+    const habitsDone = HABITS.toggle.filter(h => todayHabits.habits[h.id]).length;
+    const habitsTotal = HABITS.toggle.length;
+
+    html += `
+    <div class="today-habits-section">
+      <div class="today-habits-header">
+        <div class="today-habits-title">☑ 微习惯打卡</div>
+        <div class="today-habits-progress" style="color: ${habitsDone >= habitsTotal ? 'var(--good)' : habitsDone > 0 ? 'var(--accent)' : 'var(--text-3)'};">${habitsDone}/${habitsTotal}</div>
+      </div>
+      <div class="today-habit-grid">`;
+
+    HABITS.toggle.forEach(habit => {
+      const checked = todayHabits.habits[habit.id];
+      const isAutoMorning = habit.id === 'h-morning' && allMorningDone;
+      html += `
+        <div class="today-habit-chip ${checked ? 'checked' : ''} ${isAutoMorning ? 'auto-checked' : ''}" data-habit-id="${habit.id}">
+          ${isAutoMorning ? '<div class="chip-auto-tag">自动</div>' : ''}
+          <div class="chip-icon">${habit.icon}</div>
+          <div class="chip-name">${habit.name}</div>
+        </div>`;
+    });
+
+    html += `</div><div class="today-habit-counters">`;
+
+    HABITS.counter.forEach(habit => {
+      const count = todayHabits.counters[habit.id] || 0;
+      html += `
+        <div class="today-counter-item">
+          <div class="today-counter-label">${habit.name}</div>
+          <div class="today-counter-controls">
+            <button class="today-counter-btn" data-counter-id="${habit.id}" data-delta="-1">−</button>
+            <div class="today-counter-num">${count}</div>
+            <button class="today-counter-btn" data-counter-id="${habit.id}" data-delta="1">+</button>
+          </div>
+        </div>`;
+    });
+
+    html += `</div></div>`;
+  }
+
   view.innerHTML = html;
   
   view.querySelectorAll('.checkbox').forEach(el => {
@@ -2789,6 +2990,32 @@ async function renderToday() {
   });
   view.querySelectorAll('.action-btn[data-action="video"]').forEach(el => {
     el.addEventListener('click', () => openVideoModal(el.dataset.exname));
+  });
+
+  // 习惯打卡点击事件
+  view.querySelectorAll('.today-habit-chip').forEach(el => {
+    el.addEventListener('click', async () => {
+      const habitId = el.dataset.habitId;
+      const dateForHabits = isViewingToday() ? todayStr() : getViewingDateStr();
+      let data = await dbGet('dailyHabits', dateForHabits) || { date: dateForHabits, habits: {}, counters: {} };
+      data.habits[habitId] = !data.habits[habitId];
+      await dbPut('dailyHabits', data);
+      renderToday();
+      // 同步习惯视图(如果之后切换过去)
+    });
+  });
+
+  // 计数器点击事件
+  view.querySelectorAll('.today-counter-btn').forEach(el => {
+    el.addEventListener('click', async () => {
+      const counterId = el.dataset.counterId;
+      const delta = parseInt(el.dataset.delta);
+      const dateForHabits = isViewingToday() ? todayStr() : getViewingDateStr();
+      let data = await dbGet('dailyHabits', dateForHabits) || { date: dateForHabits, habits: {}, counters: {} };
+      data.counters[counterId] = Math.max(0, (data.counters[counterId] || 0) + delta);
+      await dbPut('dailyHabits', data);
+      renderToday();
+    });
   });
 }
 
@@ -4430,6 +4657,12 @@ async function ensureStartDate() {
   
   await renderToday();
   setTimeout(() => handleURLImport(), 300);
+
+  // ====== Service Worker 注册(PWA 离线支持) ======
+  // 仅在 http(s) 下注册(file:// 协议不支持 SW,但 file:// 本身就是离线可用的)
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();
 </script>
 </body>
