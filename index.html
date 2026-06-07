@@ -2741,31 +2741,132 @@ const AI_SYSTEM_PROMPT = `你是一位严谨的运动康复顾问。你的职责
 2. 总字数控制在 200-400 字
 3. 如果一切正常没有发现问题，简短确认即可，不需要凑字数`;
 
-async function callClaudeAPI(systemPrompt, userMessage, onDelta) {
-  const apiKey = await getSetting('claudeApiKey');
+// AI 接入商配置
+const AI_PROVIDERS = {
+  claude: {
+    name: 'Claude (Anthropic)',
+    placeholder: 'sk-ant-api03-...',
+    keyPrefix: 'sk-ant-',
+    defaultModel: 'claude-sonnet-4-20250514',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
+    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+      url: 'https://api.anthropic.com/v1/messages',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: {
+        model,
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+        stream: true
+      }
+    }),
+    parseSSE: (parsed) => {
+      if (parsed.type === 'content_block_delta' && parsed.delta?.text) return parsed.delta.text;
+      return null;
+    }
+  },
+  gemini: {
+    name: 'Gemini (Google)',
+    placeholder: 'AIza...',
+    keyPrefix: '',
+    defaultModel: 'gemini-2.5-flash',
+    keyUrl: 'https://aistudio.google.com/apikey',
+    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+      url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
+      headers: { 'Content-Type': 'application/json' },
+      body: {
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+        generationConfig: { maxOutputTokens: 1024 }
+      }
+    }),
+    parseSSE: (parsed) => {
+      if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) return parsed.candidates[0].content.parts[0].text;
+      return null;
+    }
+  },
+  qwen: {
+    name: '通义千问 (Qwen)',
+    placeholder: 'sk-...',
+    keyPrefix: '',
+    defaultModel: 'qwen-plus',
+    keyUrl: 'https://bailian.console.aliyun.com/?apiKey=1#/api-key',
+    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+      url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: {
+        model,
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        stream: true
+      }
+    }),
+    parseSSE: (parsed) => {
+      if (parsed.choices?.[0]?.delta?.content) return parsed.choices[0].delta.content;
+      return null;
+    }
+  },
+  deepseek: {
+    name: 'DeepSeek',
+    placeholder: 'sk-...',
+    keyPrefix: '',
+    defaultModel: 'deepseek-chat',
+    keyUrl: 'https://platform.deepseek.com/api_keys',
+    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+      url: 'https://api.deepseek.com/chat/completions',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: {
+        model,
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        stream: true
+      }
+    }),
+    parseSSE: (parsed) => {
+      if (parsed.choices?.[0]?.delta?.content) return parsed.choices[0].delta.content;
+      return null;
+    }
+  }
+};
+
+async function callAI(systemPrompt, userMessage, onDelta) {
+  const providerId = await getSetting('aiProvider') || 'claude';
+  const apiKey = await getSetting('aiApiKey');
   if (!apiKey) throw new Error('NO_API_KEY');
   if (!navigator.onLine) throw new Error('OFFLINE');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const provider = AI_PROVIDERS[providerId];
+  if (!provider) throw new Error(`未知的 AI 接入商: ${providerId}`);
+
+  const model = await getSetting('aiModel') || provider.defaultModel;
+  const req = provider.buildRequest(apiKey, model, systemPrompt, userMessage);
+
+  const res = await fetch(req.url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-      stream: true
-    })
+    headers: req.headers,
+    body: JSON.stringify(req.body)
   });
 
   if (!res.ok) {
     const status = res.status;
-    if (status === 401) throw new Error('API Key 无效或已过期，请到设置中检查');
+    if (status === 401 || status === 403) throw new Error('API Key 无效或已过期，请到设置中检查');
     if (status === 429) throw new Error('请求过于频繁，请稍后重试');
     const body = await res.text().catch(() => '');
     throw new Error(`API 请求失败 (${status}): ${body.slice(0, 200)}`);
@@ -2784,18 +2885,19 @@ async function callClaudeAPI(systemPrompt, userMessage, onDelta) {
     buffer = lines.pop() || '';
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]' || !data) continue;
       try {
         const parsed = JSON.parse(data);
-        if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-          fullText += parsed.delta.text;
-          if (onDelta) onDelta(parsed.delta.text, fullText);
+        const text = provider.parseSSE(parsed);
+        if (text) {
+          fullText += text;
+          if (onDelta) onDelta(text, fullText);
         }
       } catch (e) { /* 跳过非 JSON 行 */ }
     }
   }
-  return fullText;
+  return { text: fullText, model, providerId };
 }
 
 async function assembleDailyContext(dateStr) {
@@ -2941,9 +3043,9 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
   if (!section) return;
 
   // 检查 API Key
-  const apiKey = await getSetting('claudeApiKey');
+  const apiKey = await getSetting('aiApiKey');
   if (!apiKey) {
-    showToast('请先到设置页面配置 Claude API Key');
+    showToast('请先到设置页面配置 AI API Key');
     return;
   }
 
@@ -2970,7 +3072,7 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
     const contentEl = document.getElementById('ai-analysis-content');
 
     let started = false;
-    const fullText = await callClaudeAPI(AI_SYSTEM_PROMPT, context, (delta, full) => {
+    const result = await callAI(AI_SYSTEM_PROMPT, context, (delta, full) => {
       if (!started) {
         contentEl.innerHTML = '';
         started = true;
@@ -2981,9 +3083,10 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
     // 保存
     const record = {
       date: dateStr,
-      content: fullText,
+      content: result.text,
       generatedAt: Date.now(),
-      model: 'claude-sonnet-4-20250514'
+      model: result.model,
+      provider: result.providerId
     };
     await dbPut('aiAnalysis', record);
 
@@ -2994,12 +3097,12 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
         <div style="font-size: 12px; color: var(--accent); letter-spacing: 0.1em;">🤖 AI 训练分析</div>
         <div style="font-size: 11px; color: var(--text-3);">${timeStr}</div>
       </div>
-      <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(fullText)}</div>
+      <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(result.text)}</div>
       <div style="margin-top: 12px; text-align: right;">
         <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
       </div>`;
   } catch (e) {
-    const msg = e.message === 'NO_API_KEY' ? '请先到设置页面配置 Claude API Key'
+    const msg = e.message === 'NO_API_KEY' ? '请先到设置页面配置 AI API Key'
       : e.message === 'OFFLINE' ? '当前离线，无法使用 AI 分析'
       : e.message;
     section.innerHTML = `
@@ -3285,10 +3388,13 @@ async function renderToday() {
     html += `<div class="card" id="ai-analysis-section" style="margin-top: 20px;">`;
     if (savedAnalysis) {
       const timeStr = new Date(savedAnalysis.generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      const providerLabel = savedAnalysis.provider ? (AI_PROVIDERS[savedAnalysis.provider]?.name || savedAnalysis.provider) : '';
+      const modelLabel = savedAnalysis.model || '';
+      const metaLabel = [providerLabel, modelLabel].filter(Boolean).join(' · ');
       html += `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
           <div style="font-size: 12px; color: var(--accent); letter-spacing: 0.1em;">🤖 AI 训练分析</div>
-          <div style="font-size: 11px; color: var(--text-3);">${timeStr}</div>
+          <div style="font-size: 11px; color: var(--text-3);">${metaLabel ? metaLabel + ' · ' : ''}${timeStr}</div>
         </div>
         <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(savedAnalysis.content)}</div>
         <div style="margin-top: 12px; text-align: right;">
@@ -3856,15 +3962,19 @@ async function renderSettings() {
     <div class="spacer-lg"></div>
     <div class="section-title"><span>AI 分析配置</span></div>
     <div class="card">
-      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">Claude API Key</div>
+      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">AI 接入商</div>
+      <select id="ai-provider-select" onchange="onProviderChange()" style="margin-bottom: 12px;">
+        ${Object.entries(AI_PROVIDERS).map(([id, p]) => `<option value="${id}">${p.name}</option>`).join('')}
+      </select>
+      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">API Key</div>
       <div style="display: flex; gap: 8px;">
-        <input type="password" id="api-key-input" value="" placeholder="sk-ant-api03-..." style="flex: 1;">
+        <input type="password" id="api-key-input" value="" placeholder="" style="flex: 1;">
         <button style="padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px;" onclick="document.getElementById('api-key-input').type = document.getElementById('api-key-input').type === 'password' ? 'text' : 'password'">👁</button>
       </div>
-      <div class="text-small text-dim" style="margin-top: 6px;">
-        从 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color: var(--accent);">console.anthropic.com</a> 获取。仅存储在本地浏览器中
-      </div>
-      <button class="btn-primary" style="margin-top: 12px; width: 100%;" onclick="saveApiKey()">保存 API Key</button>
+      <div id="api-key-link" class="text-small text-dim" style="margin-top: 6px;"></div>
+      <div style="font-size: 13px; color: var(--text-1); margin-top: 12px; margin-bottom: 8px;">模型 <span class="text-small text-dim">(可选，留空用默认)</span></div>
+      <input type="text" id="ai-model-input" value="" placeholder="" style="margin-bottom: 0;">
+      <button class="btn-primary" style="margin-top: 12px; width: 100%;" onclick="saveAIConfig()">保存配置</button>
       <div id="api-key-status"></div>
     </div>
     <div class="spacer-lg"></div>
@@ -3906,7 +4016,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v8.8<br>
+      体态修复训练手册 · v8.9<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -3933,29 +4043,63 @@ async function renderSettings() {
     }
   }
 
-  // 异步填充 API Key 状态
+  // 异步填充 AI 配置状态
+  const providerSelect = document.getElementById('ai-provider-select');
   const apiKeyInput = document.getElementById('api-key-input');
   const apiKeyStatus = document.getElementById('api-key-status');
-  if (apiKeyInput && apiKeyStatus) {
-    const savedKey = await getSetting('claudeApiKey') || '';
+  const modelInput = document.getElementById('ai-model-input');
+  if (providerSelect && apiKeyInput) {
+    const savedProvider = await getSetting('aiProvider') || 'claude';
+    const savedKey = await getSetting('aiApiKey') || await getSetting('claudeApiKey') || '';
+    const savedModel = await getSetting('aiModel') || '';
+    providerSelect.value = savedProvider;
     apiKeyInput.value = savedKey;
-    if (savedKey) {
-      const masked = savedKey.slice(0, 10) + '...' + savedKey.slice(-4);
-      apiKeyStatus.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 已配置: ${escHtml(masked)}</div>`;
+    modelInput.value = savedModel;
+    updateProviderUI(savedProvider);
+    if (savedKey && apiKeyStatus) {
+      const masked = savedKey.length > 14 ? savedKey.slice(0, 10) + '...' + savedKey.slice(-4) : '***';
+      const providerName = AI_PROVIDERS[savedProvider]?.name || savedProvider;
+      apiKeyStatus.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 已配置: ${providerName} · ${escHtml(masked)}</div>`;
     }
   }
 }
 
-async function saveApiKey() {
-  const input = document.getElementById('api-key-input');
-  if (!input) return;
-  const key = input.value.trim();
-  if (key && !key.startsWith('sk-ant-')) {
-    showToast('API Key 格式不正确，应以 sk-ant- 开头');
+function updateProviderUI(providerId) {
+  const provider = AI_PROVIDERS[providerId];
+  if (!provider) return;
+  const keyInput = document.getElementById('api-key-input');
+  const modelInput = document.getElementById('ai-model-input');
+  const linkEl = document.getElementById('api-key-link');
+  if (keyInput) keyInput.placeholder = provider.placeholder;
+  if (modelInput) modelInput.placeholder = provider.defaultModel;
+  if (linkEl) linkEl.innerHTML = `从 <a href="${provider.keyUrl}" target="_blank" rel="noopener" style="color: var(--accent);">${provider.keyUrl.replace('https://', '').split('/')[0]}</a> 获取。仅存储在本地浏览器中`;
+}
+
+function onProviderChange() {
+  const select = document.getElementById('ai-provider-select');
+  if (select) updateProviderUI(select.value);
+}
+
+async function saveAIConfig() {
+  const providerSelect = document.getElementById('ai-provider-select');
+  const keyInput = document.getElementById('api-key-input');
+  const modelInput = document.getElementById('ai-model-input');
+  if (!providerSelect || !keyInput) return;
+
+  const providerId = providerSelect.value;
+  const key = keyInput.value.trim();
+  const model = modelInput?.value.trim() || '';
+  const provider = AI_PROVIDERS[providerId];
+
+  if (key && provider.keyPrefix && !key.startsWith(provider.keyPrefix)) {
+    showToast(`该接入商的 Key 应以 ${provider.keyPrefix} 开头`);
     return;
   }
-  await setSetting('claudeApiKey', key);
-  showToast(key ? 'API Key 已保存' : 'API Key 已清除');
+
+  await setSetting('aiProvider', providerId);
+  await setSetting('aiApiKey', key);
+  await setSetting('aiModel', model);
+  showToast(key ? `${provider.name} 配置已保存` : 'API Key 已清除');
   renderSettings();
 }
 
@@ -4345,7 +4489,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "8.8",
+    appVersion: "8.9",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
