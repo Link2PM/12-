@@ -943,6 +943,20 @@ main {
   color: var(--accent);
 }
 
+/* ====== AI 分析 Skeleton ====== */
+.ai-skeleton {
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  height: 14px;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* ====== Modal ====== */
 .modal-backdrop {
   position: fixed;
@@ -2243,7 +2257,7 @@ function getVideoForExercise(exerciseName) {
 // IndexedDB 数据库
 // ============================================================
 const DB_NAME = 'PostureRecoveryApp';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let db = null;
 
 function openDB() {
@@ -2274,6 +2288,7 @@ function openDB() {
         store.createIndex('metricId', 'metricId');
       }
       if (!database.objectStoreNames.contains('settings')) database.createObjectStore('settings', { keyPath: 'key' });
+      if (!database.objectStoreNames.contains('aiAnalysis')) database.createObjectStore('aiAnalysis', { keyPath: 'date' });
     };
   });
 }
@@ -2342,7 +2357,7 @@ function dbDelete(storeName, key) {
 // - IndexedDB 仍用于存放大文件(media)和作为影子备份
 
 const LS_PREFIX = 'pwa_';
-const LS_STORES = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings'];
+const LS_STORES = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'aiAnalysis'];
 
 function lsRead(storeName) {
   try {
@@ -2507,7 +2522,7 @@ async function _lsAdd(storeName, data) {
 async function _lsPut(storeName, data) {
   const list = lsRead(storeName);
   let keyField;
-  if (storeName === 'dailyHabits') keyField = 'date';
+  if (storeName === 'dailyHabits' || storeName === 'aiAnalysis') keyField = 'date';
   else if (storeName === 'settings') keyField = 'key';
   else keyField = 'id';
   const key = data[keyField];
@@ -2524,7 +2539,7 @@ async function _lsPut(storeName, data) {
 async function _lsGet(storeName, key) {
   const list = lsRead(storeName);
   let keyField;
-  if (storeName === 'dailyHabits') keyField = 'date';
+  if (storeName === 'dailyHabits' || storeName === 'aiAnalysis') keyField = 'date';
   else if (storeName === 'settings') keyField = 'key';
   else keyField = 'id';
   return list.find(x => x[keyField] === key);
@@ -2542,7 +2557,7 @@ async function _lsGetByIndex(storeName, indexName, value) {
 async function _lsDelete(storeName, key) {
   const list = lsRead(storeName);
   let keyField;
-  if (storeName === 'dailyHabits') keyField = 'date';
+  if (storeName === 'dailyHabits' || storeName === 'aiAnalysis') keyField = 'date';
   else if (storeName === 'settings') keyField = 'key';
   else keyField = 'id';
   const idx = list.findIndex(x => x[keyField] === key);
@@ -2705,6 +2720,297 @@ async function renderView(viewName) {
     case 'metrics': await renderMetrics(); break;
     case 'analysis': await renderAnalysis(); break;
     case 'settings': await renderSettings(); break;
+  }
+}
+
+// ============================================================
+// AI 训练分析
+// ============================================================
+
+const AI_SYSTEM_PROMPT = `你是一位严谨的运动康复顾问。你的职责是基于训练数据做出客观、真实的分析，帮助用户发现训练中存在的问题。
+
+核心原则：
+- 客观真实远大于鼓励。不要为了鼓励而淡化问题。
+- 如果数据中存在值得警惕的信号（如长期跳过某个动作、左右不对称加剧、完成率持续下降、动作感受中出现代偿/疼痛），必须明确指出。
+- 可以给出具体而明确的要求，例如：要求拍摄某个动作的侧面视频来确认动作质量；建议暂停某个动作直到解决前置问题；要求降低重量回到上一周的负荷。
+- 当数据不足以做出判断时，直接说"无法判断"，并说明需要什么额外信息。
+
+用简体中文回答。
+格式要求：
+1. 分段清晰，可用 emoji 做段落标记
+2. 总字数控制在 200-400 字
+3. 如果一切正常没有发现问题，简短确认即可，不需要凑字数`;
+
+async function callClaudeAPI(systemPrompt, userMessage, onDelta) {
+  const apiKey = await getSetting('claudeApiKey');
+  if (!apiKey) throw new Error('NO_API_KEY');
+  if (!navigator.onLine) throw new Error('OFFLINE');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      stream: true
+    })
+  });
+
+  if (!res.ok) {
+    const status = res.status;
+    if (status === 401) throw new Error('API Key 无效或已过期，请到设置中检查');
+    if (status === 429) throw new Error('请求过于频繁，请稍后重试');
+    const body = await res.text().catch(() => '');
+    throw new Error(`API 请求失败 (${status}): ${body.slice(0, 200)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+          fullText += parsed.delta.text;
+          if (onDelta) onDelta(parsed.delta.text, fullText);
+        }
+      } catch (e) { /* 跳过非 JSON 行 */ }
+    }
+  }
+  return fullText;
+}
+
+async function assembleDailyContext(dateStr) {
+  const { weekNum, dayIdx } = await getWeekDayForDate(dateStr);
+  const weekData = getWeekData(weekNum);
+  const logs = await dbGetByIndex('workoutLogs', 'date', dateStr);
+  const allNotes = await dbGetAll('exerciseNotes');
+  const habitData = await dbGet('dailyHabits', dateStr) || { habits: {}, counters: {} };
+
+  let md = '';
+
+  // 训练计划上下文
+  md += `## 训练计划上下文\n`;
+  if (weekData) {
+    md += `当前阶段：${weekData.phase}\n`;
+    const day = weekData.days[dayIdx];
+    md += `当前位置：Week ${weekNum} · ${day.dayName} · ${day.dayType === 'training' ? '训练日' : day.dayType === 'recovery' ? '恢复日' : '休息日'}\n`;
+    md += `今日标题：${day.title}\n`;
+    if (weekData.note) md += `本周提示：${weekData.note}\n`;
+  } else {
+    md += `Week ${weekNum}（超出计划范围）\n`;
+  }
+
+  // 今日计划动作与完成情况
+  md += `\n## 今日计划动作与完成情况\n`;
+  const allExercises = [];
+
+  if (weekData) {
+    const day = weekData.days[dayIdx];
+    // 晨间重置
+    PLAN_DATA.morningTemplate.exercises.forEach(ex => allExercises.push({ ...ex, group: '晨间重置' }));
+    if (day.dayType === 'training' && day.groups) {
+      PLAN_DATA.warmupTemplate.exercises.forEach(ex => allExercises.push({ ...ex, group: '训练前激活' }));
+      day.groups.forEach(g => g.exercises.forEach(ex => allExercises.push({ ...ex, group: g.title })));
+    }
+  }
+
+  let doneCount = 0;
+  allExercises.forEach(ex => { if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneCount++; });
+  const pct = allExercises.length > 0 ? Math.round(doneCount / allExercises.length * 100) : 0;
+  md += `完成 ${doneCount}/${allExercises.length} (${pct}%)\n\n`;
+
+  let currentGroup = '';
+  allExercises.forEach(ex => {
+    if (ex.group !== currentGroup) {
+      currentGroup = ex.group;
+      md += `### ${currentGroup}\n`;
+    }
+    const done = logs.find(l => l.exerciseId === ex.id && l.completed);
+    const mark = done ? '✅' : '⬜';
+    let line = `- ${mark} ${ex.name} ${ex.sets || ''}`;
+    if (ex.weight) line += ` ${ex.weight}`;
+    if (ex.tip) line += ` | 提示：${ex.tip}`;
+    md += line + '\n';
+  });
+
+  // 今日习惯
+  md += `\n## 今日习惯\n`;
+  const habitsDone = HABITS.toggle.filter(h => habitData.habits[h.id]).length;
+  md += `完成 ${habitsDone}/${HABITS.toggle.length}：`;
+  md += HABITS.toggle.map(h => `${h.name}${habitData.habits[h.id] ? '✓' : '✗'}`).join(' ');
+  md += '\n';
+  HABITS.counter.forEach(h => {
+    md += `${h.name}：${habitData.counters[h.id] || 0}${h.unit} `;
+  });
+  md += '\n';
+
+  // 今日动作记录（评论）
+  const todayStart = new Date(dateStr + 'T00:00:00').getTime();
+  const todayEnd = todayStart + 86400000;
+  const todayNotes = allNotes.filter(n => {
+    const t = new Date(n.createdAt).getTime();
+    return t >= todayStart && t < todayEnd;
+  });
+  if (todayNotes.length > 0) {
+    md += `\n## 今日动作记录\n`;
+    todayNotes.forEach(n => {
+      const exName = exerciseIdToKey(n.exerciseId) || n.exerciseKey || n.exerciseId;
+      md += `- ${exName}："${n.text}"\n`;
+    });
+  }
+
+  // 近 7 天趋势
+  md += `\n## 近 7 天趋势\n`;
+  md += `| 日期 | 类型 | 完成率 | 习惯 |\n|------|------|--------|------|\n`;
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() - i);
+    const ds = fmtDate(d);
+    const { weekNum: wn, dayIdx: di } = await getWeekDayForDate(ds);
+    const wd = getWeekData(wn);
+    const dayLogs = await dbGetByIndex('workoutLogs', 'date', ds);
+    const hd = await dbGet('dailyHabits', ds) || { habits: {} };
+
+    let dayType = '-', dayDone = 0, dayTotal = 0;
+    if (wd) {
+      const dd = wd.days[di];
+      dayType = dd.dayType === 'training' ? dd.title.split('·').pop()?.trim() || '训练' : dd.dayType === 'recovery' ? '恢复' : '休息';
+      PLAN_DATA.morningTemplate.exercises.forEach(() => dayTotal++);
+      if (dd.dayType === 'training' && dd.groups) {
+        PLAN_DATA.warmupTemplate.exercises.forEach(() => dayTotal++);
+        dd.groups.forEach(g => g.exercises.forEach(() => dayTotal++));
+      }
+      dayLogs.forEach(l => { if (l.completed) dayDone++; });
+    }
+    const dayPct = dayTotal > 0 ? Math.round(dayDone / dayTotal * 100) + '%' : '-';
+    const dayHabit = `${HABITS.toggle.filter(h => hd.habits[h.id]).length}/${HABITS.toggle.length}`;
+    md += `| ${ds} | ${dayType} | ${dayPct} | ${dayHabit} |\n`;
+  }
+
+  // 近期体测变化
+  const allMetrics = await dbGetAll('bodyMetrics');
+  if (allMetrics.length > 0) {
+    const sevenDaysAgo = new Date(dateStr);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const recentMetrics = allMetrics.filter(m => new Date(m.date) >= sevenDaysAgo);
+    if (recentMetrics.length > 0) {
+      md += `\n## 近期体测变化\n`;
+      const byMetric = {};
+      recentMetrics.forEach(m => {
+        if (!byMetric[m.metricId]) byMetric[m.metricId] = [];
+        byMetric[m.metricId].push(m);
+      });
+      Object.entries(byMetric).forEach(([metricId, entries]) => {
+        entries.sort((a, b) => a.date.localeCompare(b.date));
+        const def = METRICS.find(m => m.id === metricId);
+        const name = def ? def.name : metricId;
+        const unit = def ? def.unit : '';
+        if (entries.length >= 2) {
+          md += `${name}：${entries[0].value}→${entries[entries.length - 1].value} ${unit}\n`;
+        } else {
+          md += `${name}：${entries[0].value} ${unit} (${entries[0].date})\n`;
+        }
+      });
+    }
+  }
+
+  return md;
+}
+
+async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
+  const section = document.getElementById('ai-analysis-section');
+  if (!section) return;
+
+  // 检查 API Key
+  const apiKey = await getSetting('claudeApiKey');
+  if (!apiKey) {
+    showToast('请先到设置页面配置 Claude API Key');
+    return;
+  }
+
+  // 检查网络
+  if (!navigator.onLine) {
+    showToast('当前离线，无法使用 AI 分析');
+    return;
+  }
+
+  // 切换 loading 状态
+  section.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <div style="font-size: 12px; color: var(--accent); letter-spacing: 0.1em;">🤖 AI 训练分析</div>
+      <div style="font-size: 11px; color: var(--text-3);">分析中...</div>
+    </div>
+    <div id="ai-analysis-content" style="font-size: 13px; color: var(--text-1); line-height: 1.8; min-height: 60px;">
+      <div class="ai-skeleton" style="width: 90%;"></div>
+      <div class="ai-skeleton" style="width: 75%;"></div>
+      <div class="ai-skeleton" style="width: 85%;"></div>
+    </div>`;
+
+  try {
+    const context = await assembleDailyContext(dateStr);
+    const contentEl = document.getElementById('ai-analysis-content');
+
+    let started = false;
+    const fullText = await callClaudeAPI(AI_SYSTEM_PROMPT, context, (delta, full) => {
+      if (!started) {
+        contentEl.innerHTML = '';
+        started = true;
+      }
+      contentEl.textContent = full;
+    });
+
+    // 保存
+    const record = {
+      date: dateStr,
+      content: fullText,
+      generatedAt: Date.now(),
+      model: 'claude-sonnet-4-20250514'
+    };
+    await dbPut('aiAnalysis', record);
+
+    // 渲染完成态
+    const timeStr = new Date(record.generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    section.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div style="font-size: 12px; color: var(--accent); letter-spacing: 0.1em;">🤖 AI 训练分析</div>
+        <div style="font-size: 11px; color: var(--text-3);">${timeStr}</div>
+      </div>
+      <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(fullText)}</div>
+      <div style="margin-top: 12px; text-align: right;">
+        <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
+      </div>`;
+  } catch (e) {
+    const msg = e.message === 'NO_API_KEY' ? '请先到设置页面配置 Claude API Key'
+      : e.message === 'OFFLINE' ? '当前离线，无法使用 AI 分析'
+      : e.message;
+    section.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div style="font-size: 12px; color: var(--accent); letter-spacing: 0.1em;">🤖 AI 训练分析</div>
+        <div style="font-size: 11px; color: var(--bad);">失败</div>
+      </div>
+      <div style="font-size: 13px; color: var(--bad); line-height: 1.6;">${escHtml(msg)}</div>
+      <div style="margin-top: 12px; text-align: right;">
+        <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}')">重试</button>
+      </div>`;
   }
 }
 
@@ -2971,6 +3277,31 @@ async function renderToday() {
     });
 
     html += `</div></div>`;
+  }
+
+  // ====== AI 训练分析区域 ======
+  if (!isFuture && doneEx > 0) {
+    const savedAnalysis = await dbGet('aiAnalysis', dateStr);
+    html += `<div class="card" id="ai-analysis-section" style="margin-top: 20px;">`;
+    if (savedAnalysis) {
+      const timeStr = new Date(savedAnalysis.generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      html += `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <div style="font-size: 12px; color: var(--accent); letter-spacing: 0.1em;">🤖 AI 训练分析</div>
+          <div style="font-size: 11px; color: var(--text-3);">${timeStr}</div>
+        </div>
+        <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(savedAnalysis.content)}</div>
+        <div style="margin-top: 12px; text-align: right;">
+          <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
+        </div>`;
+    } else {
+      html += `
+        <div style="text-align: center; padding: 12px 0;">
+          <div style="font-size: 13px; color: var(--text-2); margin-bottom: 10px;">训练已完成 ${pct}%</div>
+          <button style="padding: 10px 24px; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); color: var(--bg-0); border-radius: var(--radius); font-size: 13px; font-weight: 500; letter-spacing: 0.05em;" onclick="triggerAIAnalysis('${dateStr}')">🤖 生成 AI 分析</button>
+        </div>`;
+    }
+    html += `</div>`;
   }
 
   view.innerHTML = html;
@@ -3523,6 +3854,20 @@ async function renderSettings() {
       <div id="current-week-display" style="margin-top: 12px; padding: 10px; background: rgba(212, 175, 55, 0.08); border-left: 2px solid var(--accent-dim); border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.6;"></div>
     </div>
     <div class="spacer-lg"></div>
+    <div class="section-title"><span>AI 分析配置</span></div>
+    <div class="card">
+      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">Claude API Key</div>
+      <div style="display: flex; gap: 8px;">
+        <input type="password" id="api-key-input" value="" placeholder="sk-ant-api03-..." style="flex: 1;">
+        <button style="padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px;" onclick="document.getElementById('api-key-input').type = document.getElementById('api-key-input').type === 'password' ? 'text' : 'password'">👁</button>
+      </div>
+      <div class="text-small text-dim" style="margin-top: 6px;">
+        从 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color: var(--accent);">console.anthropic.com</a> 获取。仅存储在本地浏览器中
+      </div>
+      <button class="btn-primary" style="margin-top: 12px; width: 100%;" onclick="saveApiKey()">保存 API Key</button>
+      <div id="api-key-status"></div>
+    </div>
+    <div class="spacer-lg"></div>
     <div class="section-title"><span>数据导出</span></div>
     <div class="export-section">
       <div class="export-section-title">📊 完整数据 (JSON)</div>
@@ -3561,7 +3906,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v8.7<br>
+      体态修复训练手册 · v8.8<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -3587,6 +3932,31 @@ async function renderSettings() {
       `;
     }
   }
+
+  // 异步填充 API Key 状态
+  const apiKeyInput = document.getElementById('api-key-input');
+  const apiKeyStatus = document.getElementById('api-key-status');
+  if (apiKeyInput && apiKeyStatus) {
+    const savedKey = await getSetting('claudeApiKey') || '';
+    apiKeyInput.value = savedKey;
+    if (savedKey) {
+      const masked = savedKey.slice(0, 10) + '...' + savedKey.slice(-4);
+      apiKeyStatus.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 已配置: ${escHtml(masked)}</div>`;
+    }
+  }
+}
+
+async function saveApiKey() {
+  const input = document.getElementById('api-key-input');
+  if (!input) return;
+  const key = input.value.trim();
+  if (key && !key.startsWith('sk-ant-')) {
+    showToast('API Key 格式不正确，应以 sk-ant- 开头');
+    return;
+  }
+  await setSetting('claudeApiKey', key);
+  showToast(key ? 'API Key 已保存' : 'API Key 已清除');
+  renderSettings();
 }
 
 async function updateStartDate(date) {
@@ -3975,12 +4345,13 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "8.7",
+    appVersion: "8.8",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
     bodyMetrics: await dbGetAll('bodyMetrics'),
     settings: await dbGetAll('settings'),
+    aiAnalysis: await dbGetAll('aiAnalysis'),
     media: []
   };
   const mediaItems = await dbGetAll('media');
@@ -4025,6 +4396,7 @@ async function exportJSON() {
   }
   preview += `• 习惯打卡: ${data.dailyHabits.length} 天\n` +
     `• 体测数据: ${data.bodyMetrics.length} 条\n` +
+    `• AI 分析: ${(data.aiAnalysis || []).length} 条\n` +
     `• 设置: ${data.settings.length} 项\n` +
     `• 媒体文件 (照片/视频): ${data.media.length} 个\n\n` +
     `点击「确定」下载 JSON 文件\n` +
@@ -4182,16 +4554,17 @@ async function importJSON(event) {
       dailyHabits: (data.dailyHabits || []).length,
       bodyMetrics: (data.bodyMetrics || []).length,
       settings: (data.settings || []).length,
+      aiAnalysis: (data.aiAnalysis || []).length,
       media: (data.media || []).length
     };
-    
+
     // 覆盖模式: 先清空
     if (replaceMode) {
-      const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'media'];
+      const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'aiAnalysis', 'media'];
       for (const store of stores) {
         const all = await dbGetAll(store);
         for (const item of all) {
-          const key = store === 'dailyHabits' ? item.date : (store === 'settings' ? item.key : item.id);
+          const key = (store === 'dailyHabits' || store === 'aiAnalysis') ? item.date : (store === 'settings' ? item.key : item.id);
           await dbDelete(store, key);
         }
       }
@@ -4262,6 +4635,16 @@ async function importJSON(event) {
       } catch (e) { errors.push(`habit: ${e.message}`); }
     }
     
+    // aiAnalysis: 用 date 做 key,直接覆盖
+    let aiAnalysisCount = 0;
+    for (const analysis of (data.aiAnalysis || [])) {
+      try {
+        if (!analysis.date) continue;
+        await dbPut('aiAnalysis', analysis);
+        aiAnalysisCount++;
+      } catch (e) { errors.push(`aiAnalysis: ${e.message}`); }
+    }
+
     // bodyMetrics 去重: 同 metricId + date 视为重复(同一天同一指标只保留一条)
     for (const metric of (data.bodyMetrics || [])) {
       try {
@@ -4303,6 +4686,7 @@ async function importJSON(event) {
     resultMsg += `• 动作记录: 新增 ${notesCount}${notesSkipped ? ' / 跳过重复 ' + notesSkipped : ''} (来源 ${stats.exerciseNotes})\n`;
     resultMsg += `• 习惯打卡: ${habitsCount} (来源 ${stats.dailyHabits})\n`;
     resultMsg += `• 体测数据: 新增 ${metricsCount}${metricsSkipped ? ' / 跳过重复 ' + metricsSkipped : ''} (来源 ${stats.bodyMetrics})\n`;
+    resultMsg += `• AI 分析: ${aiAnalysisCount} (来源 ${stats.aiAnalysis})\n`;
     resultMsg += `• 设置: ${settingsCount} (来源 ${stats.settings})\n`;
     resultMsg += `• 媒体文件: ${mediaCount} (来源 ${stats.media})\n`;
     if (errors.length > 0) {
@@ -4379,6 +4763,13 @@ async function diagnoseData() {
     msg += `\n⚙️ 设置 (settings): ${settings.length} 项\n`;
     settings.forEach(s => msg += `  ${s.key}: ${typeof s.value === 'object' ? JSON.stringify(s.value).slice(0, 40) : s.value}\n`);
     
+    const aiAnalysisAll = await dbGetAll('aiAnalysis');
+    msg += `\n🤖 AI 分析 (aiAnalysis): ${aiAnalysisAll.length} 条\n`;
+    if (aiAnalysisAll.length > 0) {
+      const aiDates = aiAnalysisAll.map(a => a.date).sort();
+      msg += `  日期范围: ${aiDates[0]} ~ ${aiDates[aiDates.length - 1]}\n`;
+    }
+
     msg += `\n📷 媒体文件 (media): ${media.length} 个\n`;
     if (media.length > 0) {
       const types = {};
@@ -4421,11 +4812,11 @@ async function diagnoseData() {
 async function clearAllData() {
   if (!confirm('真的要清空所有数据吗?此操作不可恢复!')) return;
   if (!confirm('再次确认:这会删除所有训练记录、习惯打卡、体测数据、动作记录、媒体文件。建议先导出备份。')) return;
-  const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'media'];
+  const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'aiAnalysis', 'media'];
   for (const store of stores) {
     const all = await dbGetAll(store);
     for (const item of all) {
-      const key = store === 'dailyHabits' ? item.date : (store === 'settings' ? item.key : item.id);
+      const key = (store === 'dailyHabits' || store === 'aiAnalysis') ? item.date : (store === 'settings' ? item.key : item.id);
       await dbDelete(store, key);
     }
   }
