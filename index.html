@@ -1041,6 +1041,7 @@ main {
   overflow-y: auto;
   flex: 1;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 /* ====== 记录条目 ====== */
@@ -1077,8 +1078,12 @@ main {
 
 .note-input {
   background: var(--bg-1);
-  min-height: 100px;
+  min-height: 60px;
+  max-height: 200px;
   margin-bottom: 8px;
+  resize: none;
+  overflow-y: auto;
+  transition: height 0.1s ease;
 }
 
 .media-upload-row {
@@ -1283,6 +1288,11 @@ main {
 .set-action-btn {
   font-size: 12px; color: var(--text-2); background: var(--bg-3);
   border: 1px dashed var(--line); padding: 4px 12px; border-radius: 6px; cursor: pointer;
+}
+.note-exercise-info {
+  background: var(--bg-2); border-left: 2px solid var(--accent-dim);
+  padding: 8px 12px; border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 12px; color: var(--text-1); line-height: 1.6; margin-bottom: 10px;
 }
 .note-section-label {
   font-size: 11px; color: var(--text-3); margin-bottom: 6px; margin-top: 12px;
@@ -2771,6 +2781,11 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function autoGrowTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
 async function getCurrentWeekDay() {
   const startDate = await getSetting('startDate');
   if (!startDate) {
@@ -2841,17 +2856,56 @@ function exerciseIdToKey(exerciseId) {
   return found ? found.name : null; // 找不到时返回 null
 }
 
-// 拿到某个动作 key 下所有评论(跨周聚合)
+// 动作名别名映射 — 新旧计划中同一动作可能有不同命名
+// 同一组内的名字共享历史记录
+const EXERCISE_NAME_ALIASES = [
+  ['高位下拉（反握·助力带）', '高位下拉（反握）', '高位下拉(反握)'],
+  ['坐姿绳索划船（助力带）', '坐姿绳索划船', '坐姿划船', '坐姿绳索划船(窄握)'],
+  ['单臂哑铃划船（助力带）', '单臂哑铃划船'],
+  ['哑铃俯身划船（助力带）', '哑铃俯身划船'],
+  ['死虫（Dead Bug）', '死虫', '死虫慢速版'],
+  ['死虫（进阶：伸腿）', '死虫加重', '健腹轮/死虫进阶'],
+  ['死悬（握力专项）', '死悬（可加重）', '死悬', '死悬 + 肩胛激活', '死悬 + 激活'],
+  ['罗马尼亚硬拉（助力带）', '罗马尼亚硬拉', '罗马尼亚硬拉(RDL)'],
+  ['单腿RDL', '单腿 RDL', '单腿 RDL + 哑铃', '单腿 RDL(辅助)'],
+  ['辅助引体（离心）', '弹力带辅助引体', '弹力带辅助引体(慢离心)', '离心引体', '离心延时引体'],
+  ['引体向上', '完整引体向上', '多握法引体', 'EMOM 引体向上'],
+  ['哑铃肩推', '哑铃肩推（W13评估后）', '哑铃推肩', '哑铃推肩(坐姿)', '哑铃推肩(坐姿靠背)', '推举(站姿)'],
+  ['弹力带面拉', '面拉'],
+  ['杠铃深蹲', '杠铃后蹲', '杠铃前蹲'],
+  ['Pallof Press 抗旋转', 'Pallof Press'],
+  ['悬垂举腿/仰卧举腿', '悬垂举腿', '悬垂举腿(腿可弯)'],
+  ['卷腹/反向卷腹', '反向卷腹'],
+  ['蚌式+侧卧外展', '蚌式开合', '蚌式 + 侧步激活'],
+  ['弹力带侧向走', '弹力带侧步'],
+  ['侧平板支撑', '侧平板'],
+  ['窄距俯卧撑', '俯卧撑加强版', '俯卧撑加强版(Push-up Plus)'],
+  ['农夫走', '单侧哑铃行走', '哑铃行走'],
+  ['器械推胸（平推）', '器械上斜推胸'],
+];
+
+function getExerciseAliases(name) {
+  const aliases = new Set([name]);
+  for (const group of EXERCISE_NAME_ALIASES) {
+    if (group.includes(name)) {
+      group.forEach(n => aliases.add(n));
+    }
+  }
+  return aliases;
+}
+
+// 拿到某个动作 key 下所有评论(跨周聚合 + 别名匹配)
 async function getNotesForKey(exerciseKey) {
   if (!exerciseKey) return [];
   const all = await dbGetAll('exerciseNotes');
+  const aliases = getExerciseAliases(exerciseKey);
   return all.filter(n => {
-    // 新评论: 直接匹配 exerciseKey 字段
-    if (n.exerciseKey === exerciseKey) return true;
+    // 新评论: 匹配 exerciseKey 字段（含别名）
+    if (n.exerciseKey && aliases.has(n.exerciseKey)) return true;
     // 老评论 fallback: 用 exerciseId 反查 name
-    if (n.exerciseId && !n.exerciseKey) {
-      const key = exerciseIdToKey(n.exerciseId);
-      return key === exerciseKey;
+    if (n.exerciseId) {
+      const key = n.exerciseKey || exerciseIdToKey(n.exerciseId);
+      if (key && aliases.has(key)) return true;
     }
     return false;
   });
@@ -4230,7 +4284,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v9.1<br>
+      体态修复训练手册 · v9.2<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -4435,18 +4489,33 @@ function findExerciseById(exerciseId) {
   return null;
 }
 
-function parsePlannedSets(setsStr) {
+function parsePlannedSets(setsStr, exData) {
   if (!setsStr) return { count: 1, type: 'reps' };
+  // "3×10"、"3×8-10"、"2×15" 等标准组×次格式
   const repsMatch = setsStr.match(/(\d+)\s*[×x]\s*(\d+)/);
-  if (repsMatch) return { count: parseInt(repsMatch[1]), defaultVal: parseInt(repsMatch[2]), type: 'reps' };
+  if (repsMatch) {
+    // 检查是否含时间单位（如 "2×20-30s/侧"）
+    if (/s\/|秒/.test(setsStr)) return { count: parseInt(repsMatch[1]), type: 'time', unit: '秒' };
+    return { count: parseInt(repsMatch[1]), defaultVal: parseInt(repsMatch[2]), type: 'reps' };
+  }
+  // "3×力竭" — 根据 tip/weight 推断是时间型还是次数型
   const failMatch = setsStr.match(/(\d+)\s*[×x]\s*力竭/);
-  if (failMatch) return { count: parseInt(failMatch[1]), type: 'reps' };
+  if (failMatch) {
+    const tip = (exData && exData.tip) || '';
+    const isTimeHint = /s\b|秒|时[间长]/.test(tip);
+    const isHold = /悬|挂|支撑|hold|hang/i.test((exData && exData.name) || '');
+    return { count: parseInt(failMatch[1]), type: (isTimeHint || isHold) ? 'time' : 'reps' };
+  }
+  // 时间格式
   const minMatch = setsStr.match(/(\d+)\s*min/i);
   if (minMatch) return { count: 1, defaultVal: parseInt(minMatch[1]), type: 'time', unit: '分' };
-  const secMatch = setsStr.match(/(\d+)\s*s(?:ec)?(?:\b|$)/i);
+  const secMatch = setsStr.match(/(\d+)\s*s(?:ec|\/)?/i);
   if (secMatch) return { count: 1, defaultVal: parseInt(secMatch[1]), type: 'time', unit: '秒' };
-  const cnSecMatch = setsStr.match(/(\d+)\s*秒/);
-  if (cnSecMatch) return { count: 1, defaultVal: parseInt(cnSecMatch[1]), type: 'time', unit: '秒' };
+  const cnTimeMatch = setsStr.match(/(\d+)\s*(秒|分钟?)/);
+  if (cnTimeMatch) return { count: 1, defaultVal: parseInt(cnTimeMatch[1]), type: 'time', unit: cnTimeMatch[2].startsWith('分') ? '分' : '秒' };
+  // "每侧60s" 等
+  const perSideTime = setsStr.match(/每侧\s*(\d+)\s*s/i);
+  if (perSideTime) return { count: 1, defaultVal: parseInt(perSideTime[1]), type: 'time', unit: '秒' };
   return { count: 1, type: 'reps' };
 }
 
@@ -4592,11 +4661,24 @@ async function openNoteModal(exerciseId, exerciseName) {
 
   // 解析计划组数，生成结构化输入行
   const exData = findExerciseById(exerciseId);
-  const planned = parsePlannedSets(exData ? exData.sets : null);
+  const planned = parsePlannedSets(exData ? exData.sets : null, exData);
   const setRows = Array.from({ length: planned.count }, (_, i) => buildSetRowHtml(i, planned.type)).join('');
+
+  // 动作要求摘要
+  let exInfoHtml = '';
+  if (exData) {
+    const parts = [];
+    if (exData.sets) parts.push(`📋 ${escHtml(exData.sets)}`);
+    if (exData.weight) parts.push(`⚖ ${escHtml(exData.weight)}`);
+    if (exData.tip) parts.push(`💡 ${escHtml(exData.tip)}`);
+    if (parts.length > 0) {
+      exInfoHtml = `<div class="note-exercise-info">${parts.join(' &nbsp;·&nbsp; ')}</div>`;
+    }
+  }
 
   let html = `
     <div class="note-input-area">
+      ${exInfoHtml}
       <div class="note-section-label">快捷记录</div>
       <div class="structured-input">
         <div id="set-rows-container" data-type="${planned.type}">${setRows}</div>
@@ -4606,7 +4688,7 @@ async function openNoteModal(exerciseId, exerciseName) {
         </div>
       </div>
       <div class="note-section-label">自由备注</div>
-      <textarea id="note-input" class="note-input" placeholder="补充说明（可选）..." style="min-height:60px"></textarea>
+      <textarea id="note-input" class="note-input" placeholder="补充说明（可选）..." oninput="autoGrowTextarea(this)"></textarea>
       <div class="media-upload-row">
         <label class="media-upload-btn">
           📷 拍照/选图
@@ -4923,7 +5005,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "9.1",
+    appVersion: "9.2",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
