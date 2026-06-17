@@ -2787,9 +2787,25 @@ function autoGrowTextarea(el) {
 }
 
 // AI 分析补充说明输入框（今日视图，生成分析时附加给 AI）
+// 支持图片/视频上传，按所选厂商能力提示
 function aiExtraInputHtml(value) {
   const v = value ? escHtml(value) : '';
-  return `<textarea id="ai-extra-input" class="note-input" placeholder="补充说明（可选）：今天的身体感受、伤痛、想让 AI 重点分析的问题等……" oninput="autoGrowTextarea(this)" style="width:100%;box-sizing:border-box;margin-bottom:10px;text-align:left;min-height:52px;">${v}</textarea>`;
+  const provider = AI_PROVIDERS[currentAIProviderId] || AI_PROVIDERS.claude;
+  const caps = provider.caps || { image: false, video: false };
+  const accept = [];
+  if (caps.image) accept.push('image/*');
+  if (caps.video) accept.push('video/*');
+  let mediaUi = '';
+  if (caps.image || caps.video) {
+    const btns = [];
+    if (caps.image) btns.push(`<label class="media-upload-btn">📷 图片<input type="file" accept="image/*" multiple onchange="handleAIMediaUpload(event, 'image')"></label>`);
+    if (caps.video) btns.push(`<label class="media-upload-btn">🎬 视频<input type="file" accept="video/*" onchange="handleAIMediaUpload(event, 'video')"></label>`);
+    const hint = provider.mediaHint ? `<div style="font-size:11px;color:var(--text-3);margin-bottom:6px;">⚠ ${escHtml(provider.mediaHint)}</div>` : '';
+    mediaUi = `${hint}<div class="media-upload-row">${btns.join('')}</div><div class="media-preview" id="ai-media-preview"></div>`;
+  } else {
+    mediaUi = `<div style="font-size:11px;color:var(--text-3);margin-bottom:6px;">当前 AI（${escHtml(provider.name)}）不支持图片/视频，如需上传请在设置中切换到 Gemini（图片+视频）或 Claude（图片）</div>`;
+  }
+  return `<textarea id="ai-extra-input" class="note-input" placeholder="补充说明（可选）：今天的身体感受、伤痛、想让 AI 重点分析的问题等……" oninput="autoGrowTextarea(this)" style="width:100%;box-sizing:border-box;margin-bottom:10px;text-align:left;min-height:52px;">${v}</textarea>${mediaUi}`;
 }
 
 async function getCurrentWeekDay() {
@@ -2978,7 +2994,34 @@ const AI_SYSTEM_PROMPT = `你是一位严谨的运动康复顾问。你的职责
 2. 总字数控制在 200-400 字
 3. 如果一切正常没有发现问题，简短确认即可，不需要凑字数`;
 
+// 媒体内容构建辅助：media = [{ type:'image'|'video', mimeType, data(base64无前缀) }]
+// Anthropic 格式：content 数组，图片用 image block；视频不支持
+function buildAnthropicContent(text, media) {
+  if (!media || media.length === 0) return text;
+  const parts = media
+    .filter(m => m.type === 'image')
+    .map(m => ({ type: 'image', source: { type: 'base64', media_type: m.mimeType, data: m.data } }));
+  parts.push({ type: 'text', text });
+  return parts;
+}
+// Gemini 格式：parts 数组，图片/视频均用 inline_data
+function buildGeminiParts(text, media) {
+  const parts = [{ text }];
+  if (media) media.forEach(m => parts.push({ inline_data: { mime_type: m.mimeType, data: m.data } }));
+  return parts;
+}
+// OpenAI 兼容格式（Qwen 等）：content 数组，图片用 image_url（data URL）
+function buildOpenAIContent(text, media) {
+  if (!media || media.length === 0) return text;
+  const parts = [{ type: 'text', text }];
+  media.filter(m => m.type === 'image').forEach(m => {
+    parts.push({ type: 'image_url', image_url: { url: `data:${m.mimeType};base64,${m.data}` } });
+  });
+  return parts;
+}
+
 // AI 接入商配置
+// caps: { image, video } 标记多模态能力；mediaHint 给出附加说明
 const AI_PROVIDERS = {
   claude: {
     name: 'Claude (Anthropic)',
@@ -2986,7 +3029,8 @@ const AI_PROVIDERS = {
     keyPrefix: 'sk-ant-',
     defaultModel: 'claude-sonnet-4-6',
     keyUrl: 'https://console.anthropic.com/settings/keys',
-    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+    caps: { image: true, video: false },
+    buildRequest: (apiKey, model, systemPrompt, userMessage, media) => ({
       url: 'https://api.anthropic.com/v1/messages',
       headers: {
         'Content-Type': 'application/json',
@@ -2998,7 +3042,7 @@ const AI_PROVIDERS = {
         model,
         max_tokens: 1024,
         system: systemPrompt,
-        messages: [{ role: 'user', content: userMessage }],
+        messages: [{ role: 'user', content: buildAnthropicContent(userMessage, media) }],
         stream: true
       }
     }),
@@ -3013,12 +3057,13 @@ const AI_PROVIDERS = {
     keyPrefix: '',
     defaultModel: 'gemini-2.5-flash',
     keyUrl: 'https://aistudio.google.com/apikey',
-    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+    caps: { image: true, video: true },
+    buildRequest: (apiKey, model, systemPrompt, userMessage, media) => ({
       url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
       headers: { 'Content-Type': 'application/json' },
       body: {
         system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+        contents: [{ role: 'user', parts: buildGeminiParts(userMessage, media) }],
         generationConfig: { maxOutputTokens: 1024 }
       }
     }),
@@ -3033,7 +3078,9 @@ const AI_PROVIDERS = {
     keyPrefix: '',
     defaultModel: 'qwen-plus',
     keyUrl: 'https://bailian.console.aliyun.com/?apiKey=1#/api-key',
-    buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
+    caps: { image: true, video: false },
+    mediaHint: '上传图片需在设置中把模型改为视觉模型（如 qwen-vl-max）',
+    buildRequest: (apiKey, model, systemPrompt, userMessage, media) => ({
       url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
       headers: {
         'Content-Type': 'application/json',
@@ -3044,7 +3091,7 @@ const AI_PROVIDERS = {
         max_tokens: 1024,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
+          { role: 'user', content: buildOpenAIContent(userMessage, media) }
         ],
         stream: true
       }
@@ -3060,6 +3107,7 @@ const AI_PROVIDERS = {
     keyPrefix: '',
     defaultModel: 'deepseek-chat',
     keyUrl: 'https://platform.deepseek.com/api_keys',
+    caps: { image: false, video: false },
     buildRequest: (apiKey, model, systemPrompt, userMessage) => ({
       url: 'https://api.deepseek.com/chat/completions',
       headers: {
@@ -3083,7 +3131,7 @@ const AI_PROVIDERS = {
   }
 };
 
-async function callAI(systemPrompt, userMessage, onDelta) {
+async function callAI(systemPrompt, userMessage, onDelta, media) {
   const providerId = await getSetting('aiProvider') || 'claude';
   const apiKey = await getSetting('aiApiKey');
   if (!apiKey) throw new Error('NO_API_KEY');
@@ -3092,8 +3140,15 @@ async function callAI(systemPrompt, userMessage, onDelta) {
   const provider = AI_PROVIDERS[providerId];
   if (!provider) throw new Error(`未知的 AI 接入商: ${providerId}`);
 
+  // 按厂商能力过滤媒体：不支持的类型直接剔除，避免请求报错
+  let sendMedia = media;
+  if (media && media.length > 0) {
+    const caps = provider.caps || { image: false, video: false };
+    sendMedia = media.filter(m => (m.type === 'image' && caps.image) || (m.type === 'video' && caps.video));
+  }
+
   const model = await getSetting('aiModel') || provider.defaultModel;
-  const req = provider.buildRequest(apiKey, model, systemPrompt, userMessage);
+  const req = provider.buildRequest(apiKey, model, systemPrompt, userMessage, sendMedia);
 
   const res = await fetch(req.url, {
     method: 'POST',
@@ -3307,6 +3362,14 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
   const extraEl = document.getElementById('ai-extra-input');
   const extraNote = extraEl ? extraEl.value.trim() : '';
 
+  // 媒体附件：按当前厂商能力过滤，并提示被忽略的类型
+  const mediaParts = aiMediaToParts(currentAIMedia);
+  const caps = (AI_PROVIDERS[currentAIProviderId] || {}).caps || { image: false, video: false };
+  const droppedVideo = mediaParts.some(m => m.type === 'video' && !caps.video);
+  const droppedImage = mediaParts.some(m => m.type === 'image' && !caps.image);
+  if (droppedVideo) showToast('当前 AI 不支持视频，已忽略视频附件（可切换到 Gemini）');
+  else if (droppedImage) showToast('当前 AI 不支持图片，已忽略图片附件');
+
   // 检查 API Key
   const apiKey = await getSetting('aiApiKey');
   if (!apiKey) {
@@ -3343,7 +3406,7 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
         started = true;
       }
       contentEl.textContent = full;
-    });
+    }, mediaParts);
 
     // 保存
     const record = {
@@ -3355,6 +3418,9 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
       extraNote: extraNote || ''
     };
     await dbPut('aiAnalysis', record);
+
+    // 分析完成后清空已发送的媒体附件
+    currentAIMedia = [];
 
     // 渲染完成态
     const timeStr = new Date(record.generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -3380,9 +3446,14 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
         <div style="font-size: 11px; color: var(--bad);">失败</div>
       </div>
       <div style="font-size: 13px; color: var(--bad); line-height: 1.6;">${escHtml(msg)}</div>
-      <div style="margin-top: 12px; text-align: right;">
-        <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}')">重试</button>
+      <div style="margin-top: 12px;">
+        ${aiExtraInputHtml(extraNote)}
+        <div style="text-align: right;">
+          <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}')">重试</button>
+        </div>
       </div>`;
+    // 失败后保留媒体附件，恢复预览
+    renderAIMediaPreview();
   }
 }
 
@@ -3658,6 +3729,7 @@ async function renderToday() {
 
   // ====== AI 训练分析区域 ======
   if (!isFuture && doneEx > 0) {
+    currentAIProviderId = await getSetting('aiProvider') || 'claude';
     const savedAnalysis = await dbGet('aiAnalysis', dateStr);
     html += `<div class="card" id="ai-analysis-section" style="margin-top: 20px;">`;
     if (savedAnalysis) {
@@ -3691,7 +3763,10 @@ async function renderToday() {
   }
 
   view.innerHTML = html;
-  
+
+  // 恢复 AI 媒体预览（重渲染后 DOM 重建）
+  renderAIMediaPreview();
+
   view.querySelectorAll('.checkbox').forEach(el => {
     el.addEventListener('click', async () => {
       if (el.classList.contains('readonly')) {
@@ -4327,7 +4402,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v9.3<br>
+      体态修复训练手册 · v9.4<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -4411,7 +4486,7 @@ async function assembleSyncPayload() {
   // 且剔除 syncSecret，避免把密钥本身推上云
   return {
     exportedAt: new Date().toISOString(),
-    appVersion: '9.3',
+    appVersion: '9.4',
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -4596,6 +4671,10 @@ function testImportURL() {
 let currentNoteExerciseId = null;
 let currentNoteExerciseName = '';
 let currentNoteMedia = [];
+
+// AI 分析补充输入框的媒体附件 + 当前厂商（供 aiExtraInputHtml 同步读取）
+let currentAIMedia = [];
+let currentAIProviderId = 'claude';
 
 const FEEL_OPTIONS = [
   { id: 'easy', label: '💪轻松', emoji: '💪' },
@@ -4958,6 +5037,49 @@ function removeMedia(idx) {
   renderMediaPreview();
 }
 
+// ===== AI 分析输入框的媒体处理 =====
+function handleAIMediaUpload(event, type) {
+  const files = event.target.files;
+  for (const file of files) {
+    // 体积保护：图片 >10MB / 视频 >20MB 时提示（base64 会膨胀约 33%，且 inline 请求有上限）
+    const maxMB = type === 'video' ? 20 : 10;
+    if (file.size > maxMB * 1024 * 1024) {
+      showToast(`${type === 'video' ? '视频' : '图片'}过大（>${maxMB}MB），可能导致请求失败`);
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      currentAIMedia.push({ type, blob: file, dataUrl: e.target.result });
+      renderAIMediaPreview();
+    };
+    reader.readAsDataURL(file);
+  }
+  event.target.value = '';
+}
+
+function renderAIMediaPreview() {
+  const preview = document.getElementById('ai-media-preview');
+  if (!preview) return;
+  preview.innerHTML = currentAIMedia.map((m, i) => `
+    <div class="media-preview-item">
+      ${m.type === 'image' ? `<img src="${m.dataUrl}" alt="">` : `<video src="${m.dataUrl}" muted></video><div class="video-tag">视频</div>`}
+      <div class="media-preview-remove" onclick="removeAIMedia(${i})">×</div>
+    </div>`).join('');
+}
+
+function removeAIMedia(idx) {
+  currentAIMedia.splice(idx, 1);
+  renderAIMediaPreview();
+}
+
+// dataURL → { type, mimeType, data(base64无前缀) }
+function aiMediaToParts(list) {
+  return list.map(m => {
+    const match = /^data:([^;]+);base64,(.*)$/.exec(m.dataUrl);
+    if (!match) return null;
+    return { type: m.type, mimeType: match[1], data: match[2] };
+  }).filter(Boolean);
+}
+
 async function saveNote() {
   const freeNote = document.getElementById('note-input').value.trim();
   const sets = collectStructuredSets();
@@ -5140,7 +5262,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "9.3",
+    appVersion: "9.4",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
