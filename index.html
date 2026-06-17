@@ -2786,6 +2786,12 @@ function autoGrowTextarea(el) {
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
 }
 
+// AI 分析补充说明输入框（今日视图，生成分析时附加给 AI）
+function aiExtraInputHtml(value) {
+  const v = value ? escHtml(value) : '';
+  return `<textarea id="ai-extra-input" class="note-input" placeholder="补充说明（可选）：今天的身体感受、伤痛、想让 AI 重点分析的问题等……" oninput="autoGrowTextarea(this)" style="width:100%;box-sizing:border-box;margin-bottom:10px;text-align:left;min-height:52px;">${v}</textarea>`;
+}
+
 async function getCurrentWeekDay() {
   const startDate = await getSetting('startDate');
   if (!startDate) {
@@ -3131,7 +3137,7 @@ async function callAI(systemPrompt, userMessage, onDelta) {
   return { text: fullText, model, providerId };
 }
 
-async function assembleDailyContext(dateStr) {
+async function assembleDailyContext(dateStr, extraNote) {
   const { weekNum, dayIdx } = await getWeekDayForDate(dateStr);
   const weekData = getWeekData(weekNum);
   const logs = await dbGetByIndex('workoutLogs', 'date', dateStr);
@@ -3139,6 +3145,11 @@ async function assembleDailyContext(dateStr) {
   const habitData = await dbGet('dailyHabits', dateStr) || { habits: {}, counters: {} };
 
   let md = '';
+
+  // 训练者补充说明（用户在生成分析前手动输入）
+  if (extraNote && extraNote.trim()) {
+    md += `## 训练者补充说明（请重点关注）\n${extraNote.trim()}\n\n`;
+  }
 
   // 训练计划上下文
   md += `## 训练计划上下文\n`;
@@ -3292,6 +3303,10 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
   const section = document.getElementById('ai-analysis-section');
   if (!section) return;
 
+  // 读取用户补充说明（在替换 innerHTML 之前）
+  const extraEl = document.getElementById('ai-extra-input');
+  const extraNote = extraEl ? extraEl.value.trim() : '';
+
   // 检查 API Key
   const apiKey = await getSetting('aiApiKey');
   if (!apiKey) {
@@ -3318,7 +3333,7 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
     </div>`;
 
   try {
-    const context = await assembleDailyContext(dateStr);
+    const context = await assembleDailyContext(dateStr, extraNote);
     const contentEl = document.getElementById('ai-analysis-content');
 
     let started = false;
@@ -3336,7 +3351,8 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
       content: result.text,
       generatedAt: Date.now(),
       model: result.model,
-      provider: result.providerId
+      provider: result.providerId,
+      extraNote: extraNote || ''
     };
     await dbPut('aiAnalysis', record);
 
@@ -3348,8 +3364,11 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
         <div style="font-size: 11px; color: var(--text-3);">${timeStr}</div>
       </div>
       <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(result.text)}</div>
-      <div style="margin-top: 12px; text-align: right;">
-        <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
+      <div style="margin-top: 12px;">
+        ${aiExtraInputHtml(extraNote)}
+        <div style="text-align: right;">
+          <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
+        </div>
       </div>`;
   } catch (e) {
     const msg = e.message === 'NO_API_KEY' ? '请先到设置页面配置 AI API Key'
@@ -3652,14 +3671,20 @@ async function renderToday() {
           <div style="font-size: 11px; color: var(--text-3);">${metaLabel ? metaLabel + ' · ' : ''}${timeStr}</div>
         </div>
         <div style="font-size: 13px; color: var(--text-1); line-height: 1.8; white-space: pre-wrap;">${escHtml(savedAnalysis.content)}</div>
-        <div style="margin-top: 12px; text-align: right;">
-          <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
+        <div style="margin-top: 12px;">
+          ${aiExtraInputHtml(savedAnalysis.extraNote || '')}
+          <div style="text-align: right;">
+            <button style="font-size: 12px; padding: 6px 14px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2);" onclick="triggerAIAnalysis('${dateStr}', true)">重新生成</button>
+          </div>
         </div>`;
     } else {
       html += `
-        <div style="text-align: center; padding: 12px 0;">
-          <div style="font-size: 13px; color: var(--text-2); margin-bottom: 10px;">训练已完成 ${pct}%</div>
-          <button style="padding: 10px 24px; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); color: var(--bg-0); border-radius: var(--radius); font-size: 13px; font-weight: 500; letter-spacing: 0.05em;" onclick="triggerAIAnalysis('${dateStr}')">🤖 生成 AI 分析</button>
+        <div style="padding: 12px 0;">
+          <div style="font-size: 13px; color: var(--text-2); margin-bottom: 10px; text-align: center;">训练已完成 ${pct}%</div>
+          ${aiExtraInputHtml('')}
+          <div style="text-align: center;">
+            <button style="padding: 10px 24px; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); color: var(--bg-0); border-radius: var(--radius); font-size: 13px; font-weight: 500; letter-spacing: 0.05em;" onclick="triggerAIAnalysis('${dateStr}')">🤖 生成 AI 分析</button>
+          </div>
         </div>`;
     }
     html += `</div>`;
@@ -4302,7 +4327,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v9.2<br>
+      体态修复训练手册 · v9.3<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -4386,7 +4411,7 @@ async function assembleSyncPayload() {
   // 且剔除 syncSecret，避免把密钥本身推上云
   return {
     exportedAt: new Date().toISOString(),
-    appVersion: '9.2',
+    appVersion: '9.3',
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -5115,7 +5140,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "9.2",
+    appVersion: "9.3",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
