@@ -4275,8 +4275,6 @@ async function renderSettings() {
     <div class="export-section">
       <div class="export-section-title">📝 AI 分析报告 (Markdown)</div>
       <div class="export-section-desc">生成结构化报告，可直接发给 Claude 等 AI 做深度分析。包含训练完成情况、习惯执行率、体测变化、最近的动作记录</div>
-      <div class="note-section-label">补充说明（可选）</div>
-      <textarea id="ai-report-extra" class="note-input" placeholder="想额外告诉 AI 的内容，例如：近期身体感受、伤痛、想重点分析的问题、特殊安排等……" oninput="autoGrowTextarea(this)" style="width:100%;box-sizing:border-box;margin-bottom:10px;"></textarea>
       <div class="export-buttons">
         <button class="btn-primary" onclick="exportForAI()">导出 .md 文件</button>
         <button class="btn-secondary" onclick="copyAIReport()">复制到剪贴板</button>
@@ -4304,7 +4302,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v9.3<br>
+      体态修复训练手册 · v9.2<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -5117,7 +5115,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "9.3",
+    appVersion: "9.2",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -5201,14 +5199,7 @@ async function generateAIReport() {
   md += `**生成日期**: ${today}\n`;
   if (startDate) md += `**训练开始日期**: ${startDate}\n`;
   md += `**当前周次**: Week ${weekNum}\n\n`;
-
-  // 用户补充说明（来自设置页输入框）
-  const extraEl = document.getElementById('ai-report-extra');
-  const extraNote = extraEl ? extraEl.value.trim() : '';
-  if (extraNote) {
-    md += `## 训练者补充说明\n\n${extraNote}\n\n`;
-  }
-
+  
   md += `## 任务\n\n请基于以下数据，作为体态修复教练对训练者进行评估:\n`;
   md += `1. 训练完成情况和趋势\n2. 习惯执行情况\n3. 体测数据变化和意义\n`;
   md += `4. 主要薄弱环节(基于动作记录)\n5. 下一阶段调整建议\n\n`;
