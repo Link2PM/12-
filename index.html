@@ -3798,6 +3798,7 @@ async function toggleExerciseDone(exerciseId, dateStr) {
   } else {
     await dbAdd('workoutLogs', { date, exerciseId, completed: true, completedAt: new Date().toISOString() });
   }
+  scheduleCloudSync();
 }
 
 // ============================================================
@@ -4246,6 +4247,23 @@ async function renderSettings() {
       <div id="api-key-status"></div>
     </div>
     <div class="spacer-lg"></div>
+    <div class="section-title"><span>云同步 (供 Claude 读取)</span></div>
+    <div class="card">
+      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">同步地址 (Supabase 函数 URL)</div>
+      <input type="text" id="sync-url-input" value="" placeholder="https://xxx.supabase.co/functions/v1/sync" style="margin-bottom: 12px;">
+      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">同步密钥</div>
+      <div style="display: flex; gap: 8px;">
+        <input type="password" id="sync-secret-input" value="" placeholder="" style="flex: 1;">
+        <button style="padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px;" onclick="const i=document.getElementById('sync-secret-input'); i.type = i.type === 'password' ? 'text' : 'password'">👁</button>
+      </div>
+      <div class="text-small text-dim" style="margin-top: 6px;">训练完成、联网时自动把数据同步到你的私有云，供 Claude 读取分析。仅存本地浏览器，不写入源码</div>
+      <div style="display: flex; gap: 8px; margin-top: 12px;">
+        <button class="btn-primary" style="flex: 1;" onclick="saveSyncConfig()">保存</button>
+        <button class="btn-secondary" style="flex: 1;" onclick="syncToCloud({silent:false})">立即同步</button>
+      </div>
+      <div id="sync-status"></div>
+    </div>
+    <div class="spacer-lg"></div>
     <div class="section-title"><span>数据导出</span></div>
     <div class="export-section">
       <div class="export-section-title">📊 完整数据 (JSON)</div>
@@ -4330,6 +4348,13 @@ async function renderSettings() {
       apiKeyStatus.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 已配置: ${providerName} · ${escHtml(masked)}</div>`;
     }
   }
+
+  // 云同步配置回填
+  const syncUrlInput = document.getElementById('sync-url-input');
+  const syncSecretInput = document.getElementById('sync-secret-input');
+  if (syncUrlInput) syncUrlInput.value = (await getSetting('syncUrl')) || '';
+  if (syncSecretInput) syncSecretInput.value = (await getSetting('syncSecret')) || '';
+  updateSyncStatus();
 }
 
 function updateProviderUI(providerId) {
@@ -4347,6 +4372,90 @@ function onProviderChange() {
   const select = document.getElementById('ai-provider-select');
   if (select) updateProviderUI(select.value);
 }
+
+// ============================================================
+// 云同步（Supabase）—— 训练完成 / 联网时自动推送整份数据快照
+// 配置（同步地址 + 密钥）只存本地设置，不写入源码（本仓库公开）
+// ============================================================
+let _syncTimer = null;
+let _syncing = false;
+let _syncDirty = false;
+
+async function assembleSyncPayload() {
+  // 与 exportJSON 同构，但不含 media blob（体积大，远端分析用不上），
+  // 且剔除 syncSecret，避免把密钥本身推上云
+  return {
+    exportedAt: new Date().toISOString(),
+    appVersion: '9.2',
+    workoutLogs: await dbGetAll('workoutLogs'),
+    exerciseNotes: await dbGetAll('exerciseNotes'),
+    dailyHabits: await dbGetAll('dailyHabits'),
+    bodyMetrics: await dbGetAll('bodyMetrics'),
+    settings: (await dbGetAll('settings')).filter(s => s.key !== 'syncSecret'),
+    aiAnalysis: await dbGetAll('aiAnalysis')
+  };
+}
+
+async function syncToCloud({ silent = true } = {}) {
+  const url = await getSetting('syncUrl');
+  const secret = await getSetting('syncSecret');
+  if (!url || !secret) { if (!silent) showToast('请先填写同步地址和密钥'); return; }
+  if (!navigator.onLine) { _syncDirty = true; if (!silent) showToast('当前离线，联网后会自动同步'); return; }
+  if (_syncing) return;
+  _syncing = true;
+  try {
+    const payload = await assembleSyncPayload();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${secret}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    _syncDirty = false;
+    await setSetting('lastSyncAt', new Date().toISOString());
+    updateSyncStatus();
+    if (!silent) showToast('✓ 已同步到云端');
+  } catch (e) {
+    _syncDirty = true;
+    console.error('云同步失败', e);
+    if (!silent) showToast('同步失败: ' + e.message);
+  } finally {
+    _syncing = false;
+  }
+}
+
+// 防抖：训练完成/记录后 8 秒内无新动作再推，避免连点狂发请求
+function scheduleCloudSync() {
+  _syncDirty = true;
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => syncToCloud({ silent: true }), 8000);
+}
+
+async function saveSyncConfig() {
+  const url = document.getElementById('sync-url-input')?.value.trim() || '';
+  const secret = document.getElementById('sync-secret-input')?.value.trim() || '';
+  await setSetting('syncUrl', url);
+  await setSetting('syncSecret', secret);
+  showToast(url && secret ? '✓ 云同步已配置' : '云同步已清除');
+  if (url && secret) syncToCloud({ silent: false });
+}
+
+async function updateSyncStatus() {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  const url = await getSetting('syncUrl');
+  if (!url) { el.innerHTML = ''; return; }
+  const last = await getSetting('lastSyncAt');
+  el.innerHTML = last
+    ? `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 上次同步: ${new Date(last).toLocaleString()}</div>`
+    : `<div style="margin-top: 8px; font-size: 12px; color: var(--text-2);">尚未同步</div>`;
+}
+
+// 联网恢复 / 切到后台时补推
+window.addEventListener('online', () => { if (_syncDirty) syncToCloud({ silent: true }); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && _syncDirty) { clearTimeout(_syncTimer); syncToCloud({ silent: true }); }
+});
 
 async function saveAIConfig() {
   const providerSelect = document.getElementById('ai-provider-select');
@@ -4878,6 +4987,7 @@ async function saveNote() {
   }
   
   showToast(`✓ 已保存 (评论 #${noteId})`);
+  scheduleCloudSync();
   closeNoteModal();
   renderToday();
 }
