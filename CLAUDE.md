@@ -5,7 +5,7 @@
 个人体态矫正训练 PWA 应用，单文件架构（`index.html` ~5200行，所有 HTML/CSS/JS 内联）。配合 `sw.js` 提供 PWA 离线缓存。
 
 **GitHub**: https://github.com/Link2PM/12-  
-**当前版本**: v8.9  
+**当前版本**: v1.0.1  
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式
 
 ## 核心设计原则
@@ -141,7 +141,7 @@ WEEKS = [
 ## 开发注意事项
 
 1. **修改后验证**: `node -e "..."` 提取 `<script>` 内容做语法检查
-2. **版本号**: 需同时更新两处：设置页底部文本 + `exportJSON()` 中的 `appVersion`
+2. **版本号**: 采用语义化三段式 `major.minor.patch`（如 `v1.0.1`）——第 1 位仅在超级大升级时 +1，第 2 位常规功能升级，第 3 位 bug 修复。需同时更新三处：设置页底部文本、`assembleSyncPayload()` 与 `exportJSON()` 中的 `appVersion`
 3. **新增 Store**: 需改 4 处：`LS_STORES` 数组、`DB_VERSION` + `onupgradeneeded`、`_lsPut/_lsGet/_lsDelete` 的 keyField 条件、`clearAllData` 的 stores 列表
 4. **导出兼容**: 新增数据表时，需同步更新 `exportJSON()`、`importData()`、`previewImport()`、`debugStorageStatus()`
 5. **推送**: `git push origin main`，用户通过 GitHub Pages 或本地文件访问
