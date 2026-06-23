@@ -4405,7 +4405,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v9.5<br>
+      体态修复训练手册 · v1.0.1<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -4489,7 +4489,7 @@ async function assembleSyncPayload() {
   // 且剔除 syncSecret，避免把密钥本身推上云
   return {
     exportedAt: new Date().toISOString(),
-    appVersion: '9.5',
+    appVersion: '1.0.1',
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -4560,10 +4560,42 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && _syncDirty) { clearTimeout(_syncTimer); syncToCloud({ silent: true }); }
 });
 
+// 校验 AI 配置是否可用：用一个最小请求探测，按 HTTP 状态判断
+// 返回 { ok:true } / { ok:true, warn:'...' } / { ok:false, msg:'...' }
+async function validateAIConfig(providerId, apiKey, model) {
+  const provider = AI_PROVIDERS[providerId];
+  if (!provider) return { ok: false, msg: '未知的接入商' };
+  if (!navigator.onLine) return { ok: false, msg: '当前离线，无法校验，请联网后重试' };
+
+  const useModel = model || provider.defaultModel;
+  const req = provider.buildRequest(apiKey, useModel, '连接测试，只需回复 ok', 'ping', null);
+  let res;
+  try {
+    res = await fetch(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(req.body) });
+  } catch (e) {
+    return { ok: false, msg: '网络/跨域错误：' + e.message };
+  }
+
+  if (res.ok) {
+    // 状态 200：尝试读一小段确认流确实开始，然后取消，避免浪费配额
+    try { const reader = res.body.getReader(); await reader.read(); await reader.cancel(); } catch (e) { /* 忽略 */ }
+    return { ok: true };
+  }
+
+  const status = res.status;
+  if (status === 401 || status === 403) return { ok: false, msg: `API Key 无效或无权限（${status}）` };
+  if (status === 404) return { ok: false, msg: '模型不存在或接口地址有误（404），请检查模型名' };
+  if (status === 429) return { ok: true, warn: '请求频率受限（429），Key 看起来有效，已保存' };
+  const body = await res.text().catch(() => '');
+  return { ok: false, msg: `校验失败（${status}）：${body.slice(0, 160)}` };
+}
+
 async function saveAIConfig() {
   const providerSelect = document.getElementById('ai-provider-select');
   const keyInput = document.getElementById('api-key-input');
   const modelInput = document.getElementById('ai-model-input');
+  const statusEl = document.getElementById('api-key-status');
+  const saveBtn = document.querySelector('button[onclick="saveAIConfig()"]');
   if (!providerSelect || !keyInput) return;
 
   const providerId = providerSelect.value;
@@ -4571,16 +4603,45 @@ async function saveAIConfig() {
   const model = modelInput?.value.trim() || '';
   const provider = AI_PROVIDERS[providerId];
 
-  if (key && provider.keyPrefix && !key.startsWith(provider.keyPrefix)) {
-    showToast(`该接入商的 Key 应以 ${provider.keyPrefix} 开头`);
+  const setStatus = (html) => { if (statusEl) statusEl.innerHTML = html; };
+
+  // 清空 Key：直接保存（无需校验）
+  if (!key) {
+    await setSetting('aiProvider', providerId);
+    await setSetting('aiApiKey', '');
+    await setSetting('aiModel', model);
+    setStatus('');
+    showToast('API Key 已清除');
+    renderSettings();
     return;
   }
 
+  if (provider.keyPrefix && !key.startsWith(provider.keyPrefix)) {
+    setStatus(`<div style="margin-top:10px;color:var(--bad);font-size:12px;">该接入商的 Key 应以 ${escHtml(provider.keyPrefix)} 开头</div>`);
+    return;
+  }
+
+  // 校验中：禁用按钮 + 提示
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+  setStatus('<div style="margin-top:10px;color:var(--text-2);font-size:12px;">⏳ 正在校验 API 可用性…</div>');
+
+  const result = await validateAIConfig(providerId, key, model);
+
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+
+  if (!result.ok) {
+    // 校验失败：不保存，显示原因
+    setStatus(`<div style="margin-top:10px;color:var(--bad);font-size:12px;line-height:1.6;">❌ 未保存：${escHtml(result.msg)}</div>`);
+    showToast('API 校验未通过，未保存');
+    return;
+  }
+
+  // 校验通过：保存
   await setSetting('aiProvider', providerId);
   await setSetting('aiApiKey', key);
   await setSetting('aiModel', model);
-  showToast(key ? `${provider.name} 配置已保存` : 'API Key 已清除');
-  renderSettings();
+  setStatus(`<div style="margin-top:10px;color:var(--good);font-size:12px;line-height:1.6;">✅ ${escHtml(result.warn || provider.name + ' 校验通过，配置已保存')}</div>`);
+  showToast(result.warn ? '已保存（有提示）' : `${provider.name} 配置已保存`);
 }
 
 async function updateStartDate(date) {
@@ -5265,7 +5326,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "9.5",
+    appVersion: "1.0.1",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
