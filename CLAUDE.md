@@ -5,6 +5,7 @@
 个人体态矫正训练 PWA 应用，单文件架构（`index.html` ~5200行，所有 HTML/CSS/JS 内联）。配合 `sw.js` 提供 PWA 离线缓存。
 
 **GitHub**: https://github.com/Link2PM/12-  
+**线上地址**: https://link2pm.github.io/12-/ （GitHub Pages，iOS Safari 打开后「添加到主屏幕」）  
 **当前版本**: v1.0.1  
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式
 
@@ -65,9 +66,16 @@ ai-report-*.md      — 历史 AI 分析报告导出
 与 localStorage 同构，额外包含：
 - `media` store：照片/视频 Blob，通过 `noteId` 关联到 exerciseNotes
 
+### ⚠️ iOS PWA 存储隔离（重要运维知识）
+
+iOS 上**每个主屏图标是独立的 PWA 实例，各有独立的 localStorage/IndexedDB 容器**。后果：
+- 换图标（改了 `apple-touch-icon`/manifest）后让用户「删除旧图标→重新添加到主屏」，会开一个**全新空容器**，旧的开始日期和训练记录都不在新容器里 → 表现为「计划/开始时间不对、记录没了」，但**数据并未真正丢失**，仍在旧实例中。
+- 正确迁移方式：旧实例 设置页「导出 JSON」→ 存到「文件」App → 新实例 设置页「导入数据」。**切勿让用户先删旧图标**，确认新实例数据无误后再删。
+- 因此换图标这类改动，事前要提醒用户先导出备份。
+
 ### 关键 Settings 键
 
-- `startDate`: 训练开始日期（Week 3 周一），用于计算当前周次
+- `startDate`: 训练开始日期（Week 3 周一，实际值 `2026-06-08`），用于计算当前周次
 - `aiProvider`: AI 接入商 ID（`claude`/`gemini`/`qwen`/`deepseek`）
 - `aiApiKey`: AI API Key
 - `aiModel`: 自定义模型名（可选，留空用默认）
@@ -76,12 +84,17 @@ ai-report-*.md      — 历史 AI 分析报告导出
 
 ### 多厂商支持（`AI_PROVIDERS`）
 
-| ID | 厂商 | 默认模型 | API 格式 |
-|----|------|----------|----------|
-| `claude` | Anthropic | `claude-sonnet-4-6` | 自有 Messages API |
-| `gemini` | Google | `gemini-2.5-flash` | Gemini API (SSE) |
-| `qwen` | 阿里云 | `qwen-plus` | OpenAI 兼容 |
-| `deepseek` | DeepSeek | `deepseek-chat` | OpenAI 兼容 |
+| ID | 厂商 | 默认模型 | API 格式 | 多模态（caps） |
+|----|------|----------|----------|----------------|
+| `claude` | Anthropic | `claude-sonnet-4-6` | 自有 Messages API | 图片✅ 视频❌ |
+| `gemini` | Google | `gemini-2.5-flash` | Gemini API (SSE) | 图片✅ 视频✅ |
+| `qwen` | 阿里云 | `qwen-plus` | OpenAI 兼容 | 图片✅(需 qwen-vl 模型) 视频❌ |
+| `deepseek` | DeepSeek | `deepseek-chat` | OpenAI 兼容 | 不支持 |
+
+- 每个 provider 有 `caps:{image,video}` 标记；`callAI(sys, msg, onDelta, media)` 按能力过滤媒体。
+- 内容构建辅助：`buildAnthropicContent` / `buildGeminiParts` / `buildOpenAIContent`。
+- 今日 AI 分析输入框（`aiExtraInputHtml`）按所选厂商动态显示图片/视频上传按钮。
+- 保存 AI 配置前会 `validateAIConfig()` 实测 API（401/403/404 不保存，429 视为有效）。
 
 ### 数据流
 
