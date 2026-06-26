@@ -2203,6 +2203,7 @@ function buildV3Week(weekNum) {
 
   const days = dayKeys.map((key, idx) => {
     const tmpl = pc.days[key];
+    let dayExCounter = 0;
     return {
       dayName: dayNames[idx],
       dayType: 'training',
@@ -2211,14 +2212,17 @@ function buildV3Week(weekNum) {
       groups: tmpl.groups.map(g => ({
         title: g.title,
         description: g.description,
-        exercises: g.exercises.map((ex, exIdx) => ({
-          id: `w${weekNum}-d${idx + 1}-${exIdx + 1}`,
-          name: ex.name,
-          sets: isDeload ? deloadSets(ex.sets) : ex.sets,
-          weight: ex.weight || '',
-          tip: ex.tip || '',
-          superSet: ex.superSet || false
-        }))
+        exercises: g.exercises.map((ex) => {
+          dayExCounter += 1;
+          return {
+            id: `w${weekNum}-d${idx + 1}-${dayExCounter}`,
+            name: ex.name,
+            sets: isDeload ? deloadSets(ex.sets) : ex.sets,
+            weight: ex.weight || '',
+            tip: ex.tip || '',
+            superSet: ex.superSet || false
+          };
+        })
       }))
     };
   });
@@ -2874,11 +2878,24 @@ function getAllExercises() {
 //
 // 这样,用户的评论按 name 关联,跨周自然共享同一个动作的训练历史
 
-function exerciseIdToKey(exerciseId) {
-  if (!exerciseId) return null;
-  const all = getAllExercises();
-  const found = all.find(e => e.id === exerciseId);
-  return found ? found.name : null; // 找不到时返回 null
+function exerciseIdToKey(exerciseId, exerciseName) {
+  if (exerciseName) return exerciseName;
+  const found = findExerciseById(exerciseId);
+  return found ? found.name : null;
+}
+
+function getExercisesForDay(weekNum, dayIdx) {
+  const weekData = getWeekData(weekNum);
+  if (!weekData?.days?.[dayIdx]?.groups) return [];
+  return weekData.days[dayIdx].groups.flatMap(g => g.exercises || []);
+}
+
+function isActivationWarmupName(name) {
+  return /蚌式|侧卧外展|臀肌激活|侧步激活|侧向走/.test(name) && !/深蹲|硬拉/.test(name);
+}
+
+function maxNoteSetWeight(note) {
+  return (note.sets || []).reduce((mx, s) => Math.max(mx, s.weight || 0), 0);
 }
 
 // 动作名别名映射 — 新旧计划中同一动作可能有不同命名
@@ -2944,13 +2961,54 @@ async function backfillExerciseKey() {
     if (!n.exerciseKey && n.exerciseId) {
       const key = exerciseIdToKey(n.exerciseId);
       if (key) {
-        // dbPut 走 _lsPut 主存储 + IDB 影子
         await dbPut('exerciseNotes', { ...n, exerciseKey: key });
         filled++;
       }
     }
   }
   return filled;
+}
+
+// 修复 V3 计划多训练组共用 exerciseId 导致的评论错绑（如高脚杯深蹲 → 蚌式激活）
+async function repairMislinkedExerciseNotes() {
+  const all = await dbGetAll('exerciseNotes');
+  let fixed = 0;
+  for (const n of all) {
+    const m = n.exerciseId?.match(/^w(\d+)-d(\d+)-/);
+    if (!m) continue;
+    const weekNum = parseInt(m[1], 10);
+    const dayIdx = parseInt(m[2], 10) - 1;
+    const dayExercises = getExercisesForDay(weekNum, dayIdx);
+    if (dayExercises.length === 0) continue;
+
+    let target = null;
+    if (n.exerciseKey) {
+      const aliases = getExerciseAliases(n.exerciseKey);
+      target = dayExercises.find(e => aliases.has(e.name));
+      if (target && isActivationWarmupName(target.name)) {
+        const maxW = maxNoteSetWeight(n);
+        const textHint = `${n.text || ''}${n.freeNote || ''}`;
+        if (maxW >= 12 || /深蹲|goblet/i.test(textHint)) {
+          const goblet = dayExercises.find(e => e.name.includes('高脚杯'));
+          if (goblet) target = goblet;
+        }
+      }
+    }
+    if (!target) {
+      const byId = dayExercises.filter(e => e.id === n.exerciseId);
+      if (byId.length === 1) target = byId[0];
+    }
+    if (!target && n.exerciseKey) {
+      const aliases = getExerciseAliases(n.exerciseKey);
+      target = dayExercises.find(e => aliases.has(e.name));
+    }
+
+    if (target && (target.id !== n.exerciseId || target.name !== n.exerciseKey)) {
+      await dbPut('exerciseNotes', { ...n, exerciseId: target.id, exerciseKey: target.name });
+      fixed++;
+    }
+  }
+  return fixed;
 }
 
 // ============================================================
@@ -4405,7 +4463,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v1.0.1<br>
+      体态修复训练手册 · v1.0.2<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -4489,7 +4547,7 @@ async function assembleSyncPayload() {
   // 且剔除 syncSecret，避免把密钥本身推上云
   return {
     exportedAt: new Date().toISOString(),
-    appVersion: '1.0.1',
+    appVersion: '1.0.2',
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -4735,6 +4793,66 @@ function testImportURL() {
 let currentNoteExerciseId = null;
 let currentNoteExerciseName = '';
 let currentNoteMedia = [];
+const noteDraftCache = new Map();
+
+function noteDraftKey(exerciseId, exerciseName) {
+  return `${exerciseId}|${exerciseName}`;
+}
+
+function saveNoteDraftToCache(exerciseId, exerciseName) {
+  if (!exerciseId) return;
+  const input = document.getElementById('note-input');
+  const sets = collectStructuredSets();
+  const freeNote = input ? input.value.trim() : '';
+  const key = noteDraftKey(exerciseId, exerciseName);
+  if (!freeNote && sets.length === 0 && currentNoteMedia.length === 0) {
+    noteDraftCache.delete(key);
+    return;
+  }
+  noteDraftCache.set(key, {
+    sets,
+    freeNote,
+    media: currentNoteMedia.map(m => ({ type: m.type, blob: m.blob, dataUrl: m.dataUrl }))
+  });
+}
+
+function applyNoteDraft(exerciseId, exerciseName) {
+  const draft = noteDraftCache.get(noteDraftKey(exerciseId, exerciseName));
+  if (!draft) return;
+
+  const input = document.getElementById('note-input');
+  if (input && draft.freeNote) {
+    input.value = draft.freeNote;
+    autoGrowTextarea(input);
+  }
+
+  if (draft.sets?.length > 0) {
+    const container = document.getElementById('set-rows-container');
+    if (container) {
+      while (container.querySelectorAll('.set-row').length < draft.sets.length) addSetRow();
+      draft.sets.forEach((s, i) => {
+        const row = container.querySelector(`.set-row[data-set-index="${i}"]`);
+        if (!row) return;
+        const weightEl = row.querySelector('.set-weight');
+        const repsEl = row.querySelector('.set-reps');
+        const durationEl = row.querySelector('.set-duration');
+        const unitEl = row.querySelector('.set-row-unit.clickable');
+        if (s.weight !== undefined && weightEl) weightEl.value = s.weight;
+        if (s.reps !== undefined && repsEl) repsEl.value = s.reps;
+        if (s.duration !== undefined && durationEl) {
+          durationEl.value = s.duration;
+          if (unitEl && s.unit) unitEl.textContent = s.unit;
+        }
+        if (s.feel) selectFeel(i, s.feel);
+      });
+    }
+  }
+
+  if (draft.media?.length > 0) {
+    currentNoteMedia = draft.media.map(m => ({ type: m.type, blob: m.blob, dataUrl: m.dataUrl }));
+    renderMediaPreview();
+  }
+}
 
 // AI 分析补充输入框的媒体附件 + 当前厂商（供 aiExtraInputHtml 同步读取）
 let currentAIMedia = [];
@@ -4747,23 +4865,28 @@ const FEEL_OPTIONS = [
   { id: 'fail', label: '❌未完成', emoji: '❌' }
 ];
 
-function findExerciseById(exerciseId) {
+function findExerciseById(exerciseId, exerciseName) {
   if (!exerciseId) return null;
-  let ex = PLAN_DATA.morningTemplate.exercises.find(e => e.id === exerciseId);
-  if (ex) return ex;
-  ex = PLAN_DATA.warmupTemplate.exercises.find(e => e.id === exerciseId);
-  if (ex) return ex;
+  const matches = [];
+  const collect = (ex) => { if (ex.id === exerciseId) matches.push(ex); };
+  PLAN_DATA.morningTemplate.exercises.forEach(collect);
+  PLAN_DATA.warmupTemplate.exercises.forEach(collect);
   for (const week of WEEKS) {
     for (const day of week.days) {
-      if (day.groups) {
-        for (const group of day.groups) {
-          ex = group.exercises.find(e => e.id === exerciseId);
-          if (ex) return ex;
-        }
+      if (!day.groups) continue;
+      for (const group of day.groups) {
+        group.exercises?.forEach(collect);
       }
     }
   }
-  return null;
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  if (exerciseName) {
+    const aliases = getExerciseAliases(exerciseName);
+    const byName = matches.find(e => aliases.has(e.name));
+    if (byName) return byName;
+  }
+  return matches[0];
 }
 
 function parsePlannedSets(setsStr, exData) {
@@ -4920,9 +5043,16 @@ function formatNoteDisplay(note) {
 }
 
 async function openNoteModal(exerciseId, exerciseName) {
+  const modal = document.getElementById('note-modal');
+  if (currentNoteExerciseId && modal.classList.contains('show')) {
+    saveNoteDraftToCache(currentNoteExerciseId, currentNoteExerciseName);
+  }
+
   currentNoteExerciseId = exerciseId;
   currentNoteExerciseName = exerciseName;
-  currentNoteMedia = [];
+  const draftKey = noteDraftKey(exerciseId, exerciseName);
+  const cachedDraft = noteDraftCache.get(draftKey);
+  currentNoteMedia = cachedDraft?.media ? cachedDraft.media.map(m => ({ ...m })) : [];
 
   document.getElementById('note-modal-title').innerHTML = `${escHtml(exerciseName)} <small>动作记录</small>`;
 
@@ -4936,8 +5066,7 @@ async function openNoteModal(exerciseId, exerciseName) {
     ? `<div style="font-size: 11px; color: var(--text-3); margin-bottom: 8px;">📎 该动作的评论跨 ${weekTags.length} 周聚合显示</div>`
     : '';
 
-  // 解析计划组数，生成结构化输入行
-  const exData = findExerciseById(exerciseId);
+  const exData = findExerciseById(exerciseId, exerciseName);
   const planned = parsePlannedSets(exData ? exData.sets : null, exData);
   const setRows = Array.from({ length: planned.count }, (_, i) => buildSetRowHtml(i, planned.type)).join('');
 
@@ -4990,10 +5119,10 @@ async function openNoteModal(exerciseId, exerciseName) {
 
   document.getElementById('note-modal-body').innerHTML = html;
 
-  // 渲染历史记录（同日合并）
   await renderNoteHistory(notes);
+  applyNoteDraft(exerciseId, exerciseName);
 
-  document.getElementById('note-modal').classList.add('show');
+  modal.classList.add('show');
 }
 
 async function renderNoteHistory(notes) {
@@ -5162,7 +5291,7 @@ async function saveNote() {
 
   const noteData = {
     exerciseId: currentNoteExerciseId,
-    exerciseKey: exerciseIdToKey(currentNoteExerciseId),
+    exerciseKey: currentNoteExerciseName || exerciseIdToKey(currentNoteExerciseId),
     text,
     createdAt: new Date().toISOString()
   };
@@ -5197,6 +5326,7 @@ async function saveNote() {
     }
   }
   
+  noteDraftCache.delete(noteDraftKey(currentNoteExerciseId, currentNoteExerciseName));
   showToast(`✓ 已保存 (评论 #${noteId})`);
   scheduleCloudSync();
   closeNoteModal();
@@ -5213,8 +5343,12 @@ async function deleteNote(noteId) {
 
 function closeNoteModal(event) {
   if (event && event.target !== event.currentTarget) return;
+  if (currentNoteExerciseId) {
+    saveNoteDraftToCache(currentNoteExerciseId, currentNoteExerciseName);
+  }
   document.getElementById('note-modal').classList.remove('show');
   currentNoteExerciseId = null;
+  currentNoteExerciseName = '';
   currentNoteMedia = [];
 }
 
@@ -5326,7 +5460,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "1.0.1",
+    appVersion: "1.0.2",
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -5997,8 +6131,11 @@ async function ensureStartDate() {
   
   // 4. v8.6: 为所有缺 exerciseKey 的老评论自动回填(让评论跨周聚合)
   const backfilled = await backfillExerciseKey();
+
+  // 5. v1.0.2: 修复 V3 多训练组重复 exerciseId 导致的评论错绑
+  const notesRepaired = await repairMislinkedExerciseNotes();
   
-  if (idbMigration.migrated > 0 || oldBackupCount > 0 || backfilled > 0) {
+  if (idbMigration.migrated > 0 || oldBackupCount > 0 || backfilled > 0 || notesRepaired > 0) {
     const parts = [];
     if (idbMigration.migrated > 0) {
       parts.push(`从 IndexedDB 迁移: ${idbMigration.summary.join(', ')}`);
@@ -6008,6 +6145,9 @@ async function ensureStartDate() {
     }
     if (backfilled > 0) {
       parts.push(`已为 ${backfilled} 条老评论自动关联动作 (跨周共享)`);
+    }
+    if (notesRepaired > 0) {
+      parts.push(`已修复 ${notesRepaired} 条错绑到错误动作的评论`);
     }
     setTimeout(() => {
       alert(
