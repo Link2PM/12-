@@ -1,5 +1,5 @@
-const CACHE_NAME = 'healthy-v4';
-const ASSETS = ['./', './index.html'];
+const CACHE_NAME = 'healthy-v5';
+const ASSETS = ['./', './index.html', './plan.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
