@@ -1646,8 +1646,9 @@ hr {
 <!-- Toast -->
 <div id="toast" class="toast"></div>
 
-<script src="plan.js"></script>
+<script src="plan.js?v=1.2.0"></script>
 <script>
+const APP_VERSION = '1.2.0';
 // 计划周次范围由 plan.js 的 WEEKS 派生,计划可从任意周次开始(不必从 1 开始)
 const PLAN_FIRST_WEEK = WEEKS[0].weekNum;
 const PLAN_LAST_WEEK = WEEKS[WEEKS.length - 1].weekNum;
@@ -1840,6 +1841,18 @@ function _idbPut(storeName, data) {
     req.onerror = () => reject(req.error);
   });
 }
+function _idbPutMany(storeName, items) {
+  if (items.length === 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    if (!db) return reject(new Error('db not opened'));
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    items.forEach(item => store.put(item));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+  });
+}
 function _idbGet(storeName, key) {
   return new Promise((resolve, reject) => {
     if (!db) return reject(new Error('db not opened'));
@@ -1885,6 +1898,31 @@ async function dbAdd(storeName, data) {
 async function dbPut(storeName, data) {
   if (_isLSStore(storeName)) return _lsPut(storeName, data);
   return _idbPut(storeName, data);
+}
+async function dbPutMany(storeName, items) {
+  if (items.length === 0) return 0;
+  if (!_isLSStore(storeName)) {
+    await _idbPutMany(storeName, items);
+    return items.length;
+  }
+  const list = lsRead(storeName);
+  let keyField;
+  if (storeName === 'dailyHabits' || storeName === 'aiAnalysis') keyField = 'date';
+  else if (storeName === 'settings') keyField = 'key';
+  else keyField = 'id';
+  const indexes = new Map(list.map((item, index) => [item[keyField], index]));
+  items.forEach(item => {
+    const index = indexes.get(item[keyField]);
+    if (index === undefined) {
+      indexes.set(item[keyField], list.length);
+      list.push(item);
+    } else {
+      list[index] = item;
+    }
+  });
+  if (!lsWrite(storeName, list)) throw new Error(`${storeName} 批量写入失败`);
+  try { await _idbPutMany(storeName, items); } catch (e) { /* IDB 影子失败不影响主存储 */ }
+  return items.length;
 }
 async function dbGet(storeName, key) {
   if (_isLSStore(storeName)) return _lsGet(storeName, key);
@@ -2099,6 +2137,30 @@ function getExercisesForDay(weekNum, dayIdx) {
   return weekData.days[dayIdx].groups.flatMap(g => g.exercises || []);
 }
 
+// V4 用 main-only 统计口径：只统计正式动作槽位；热身、有氧和条件项仍可
+// 打卡/记录，但不进入 18 槽完成率。旧计划没有 progressMode，继续沿用旧口径。
+function shouldCountExercise(exercise, day, source = 'day') {
+  if (!day || day.progressMode !== 'main-only') return true;
+  return source === 'day' && exercise.countsTowardProgress !== false;
+}
+
+function getDayExerciseEntries(day) {
+  if (!day) return [];
+  const entries = [];
+  if (!day.skipMorning) {
+    PLAN_DATA.morningTemplate.exercises.forEach(ex => entries.push({ ...ex, group: '每日体态矫正', sourceType: 'morning' }));
+  }
+  if (day.dayType === 'training' && day.groups) {
+    if (!day.skipWarmup) {
+      PLAN_DATA.warmupTemplate.exercises.forEach(ex => entries.push({ ...ex, group: '训练前激活', sourceType: 'warmup' }));
+    }
+    day.groups.forEach(group => {
+      (group.exercises || []).forEach(ex => entries.push({ ...ex, group: group.title, sourceType: 'day' }));
+    });
+  }
+  return entries;
+}
+
 function isActivationWarmupName(name) {
   return /蚌式|侧卧外展|臀肌激活|侧步激活|侧向走/.test(name) && !/深蹲|硬拉/.test(name);
 }
@@ -2118,12 +2180,24 @@ function getExerciseAliases(name) {
   return aliases;
 }
 
+function resolveMovementId(exerciseName, exerciseId) {
+  const exact = findExerciseById(exerciseId, exerciseName);
+  if (exact?.movementId) return exact.movementId;
+  const semanticName = exerciseName || exact?.name || '';
+  if (!semanticName) return null;
+  const aliases = getExerciseAliases(semanticName);
+  const match = getAllExercises().find(ex => ex.movementId && aliases.has(ex.name));
+  return match?.movementId || null;
+}
+
 // 拿到某个动作 key 下所有评论(跨周聚合 + 别名匹配)
-async function getNotesForKey(exerciseKey) {
+async function getNotesForKey(exerciseKey, movementId = null) {
   if (!exerciseKey) return [];
   const all = await dbGetAll('exerciseNotes');
   const aliases = getExerciseAliases(exerciseKey);
   return all.filter(n => {
+    // v1.2.0+: 稳定 movementId 优先；旧数据仍通过名称别名回退。
+    if (movementId && n.movementId === movementId) return true;
     // 新评论: 匹配 exerciseKey 字段（含别名）
     if (n.exerciseKey && aliases.has(n.exerciseKey)) return true;
     // 老评论 fallback: 用 exerciseId 反查 name
@@ -2140,15 +2214,56 @@ async function backfillExerciseKey() {
   const all = await dbGetAll('exerciseNotes');
   let filled = 0;
   for (const n of all) {
+    let changed = false;
+    let next = { ...n };
     if (!n.exerciseKey && n.exerciseId) {
       const key = exerciseIdToKey(n.exerciseId);
       if (key) {
-        await dbPut('exerciseNotes', { ...n, exerciseKey: key });
-        filled++;
+        next.exerciseKey = key;
+        changed = true;
       }
+    }
+    const semanticName = next.exerciseKey || exerciseIdToKey(next.exerciseId);
+    if (!next.movementId && semanticName) {
+      const movementId = resolveMovementId(semanticName, next.exerciseId);
+      if (movementId) {
+        next.movementId = movementId;
+        changed = true;
+      }
+    }
+    if (changed) {
+      await dbPut('exerciseNotes', next);
+      filled++;
     }
   }
   return filled;
+}
+
+// v1.2.0: 旧完成日志仍保留原 exerciseId，同时补稳定 movementId 供跨周期索引。
+async function backfillWorkoutMovementIds() {
+  const all = await dbGetAll('workoutLogs');
+  const exercises = getAllExercises();
+  const nameByPositionId = new Map();
+  exercises.forEach(exercise => {
+    if (!nameByPositionId.has(exercise.id)) nameByPositionId.set(exercise.id, exercise.name);
+  });
+  const movementExercises = exercises.filter(exercise => exercise.movementId);
+  const movementIdByName = new Map();
+  exercises.forEach(exercise => {
+    const aliases = getExerciseAliases(exercise.name);
+    const match = movementExercises.find(candidate => aliases.has(candidate.name));
+    if (match) movementIdByName.set(exercise.name, match.movementId);
+  });
+  const updates = [];
+  for (const log of all) {
+    if (log.movementId || !log.exerciseId) continue;
+    const historicalName = nameByPositionId.get(log.exerciseId);
+    const movementId = historicalName ? movementIdByName.get(historicalName) : null;
+    if (!movementId) continue;
+    updates.push({ ...log, movementId });
+  }
+  await dbPutMany('workoutLogs', updates);
+  return updates.length;
 }
 
 // 修复 V3 计划多训练组共用 exerciseId 导致的评论错绑（如高脚杯深蹲 → 蚌式激活）
@@ -2186,7 +2301,12 @@ async function repairMislinkedExerciseNotes() {
     }
 
     if (target && (target.id !== n.exerciseId || target.name !== n.exerciseKey)) {
-      await dbPut('exerciseNotes', { ...n, exerciseId: target.id, exerciseKey: target.name });
+      await dbPut('exerciseNotes', {
+        ...n,
+        exerciseId: target.id,
+        exerciseKey: target.name,
+        movementId: target.movementId || resolveMovementId(target.name, target.id) || n.movementId
+      });
       fixed++;
     }
   }
@@ -2463,24 +2583,20 @@ async function assembleDailyContext(dateStr, extraNote) {
 
   // 今日计划动作与完成情况
   md += `\n## 今日计划动作与完成情况\n`;
-  const allExercises = [];
+  let allExercises = [];
 
   if (weekData) {
     const day = weekData.days[dayIdx];
-    // 晨间重置
-    PLAN_DATA.morningTemplate.exercises.forEach(ex => allExercises.push({ ...ex, group: '每日体态矫正' }));
-    if (day.dayType === 'training' && day.groups) {
-      if (!day.skipWarmup) {
-        PLAN_DATA.warmupTemplate.exercises.forEach(ex => allExercises.push({ ...ex, group: '训练前激活' }));
-      }
-      day.groups.forEach(g => g.exercises.forEach(ex => allExercises.push({ ...ex, group: g.title })));
-    }
+    allExercises = getDayExerciseEntries(day);
   }
 
+  const countedExercises = weekData
+    ? allExercises.filter(ex => shouldCountExercise(ex, weekData.days[dayIdx], ex.sourceType))
+    : [];
   let doneCount = 0;
-  allExercises.forEach(ex => { if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneCount++; });
-  const pct = allExercises.length > 0 ? Math.round(doneCount / allExercises.length * 100) : 0;
-  md += `完成 ${doneCount}/${allExercises.length} (${pct}%)\n\n`;
+  countedExercises.forEach(ex => { if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneCount++; });
+  const pct = countedExercises.length > 0 ? Math.round(doneCount / countedExercises.length * 100) : 0;
+  md += `正式动作槽完成 ${doneCount}/${countedExercises.length} (${pct}%)\n\n`;
 
   let currentGroup = '';
   allExercises.forEach(ex => {
@@ -2555,12 +2671,9 @@ async function assembleDailyContext(dateStr, extraNote) {
     if (wd) {
       const dd = wd.days[di];
       dayType = dd.dayType === 'training' ? dd.title.split('·').pop()?.trim() || '训练' : dd.dayType === 'recovery' ? '恢复' : '休息';
-      PLAN_DATA.morningTemplate.exercises.forEach(() => dayTotal++);
-      if (dd.dayType === 'training' && dd.groups) {
-        if (!dd.skipWarmup) PLAN_DATA.warmupTemplate.exercises.forEach(() => dayTotal++);
-        dd.groups.forEach(g => g.exercises.forEach(() => dayTotal++));
-      }
-      dayLogs.forEach(l => { if (l.completed) dayDone++; });
+      const eligible = getDayExerciseEntries(dd).filter(ex => shouldCountExercise(ex, dd, ex.sourceType));
+      dayTotal = eligible.length;
+      dayDone = eligible.filter(ex => dayLogs.some(l => l.exerciseId === ex.id && l.completed)).length;
     }
     const dayPct = dayTotal > 0 ? Math.round(dayDone / dayTotal * 100) + '%' : '-';
     const dayHabit = `${HABITS.toggle.filter(h => hd.habits[h.id]).length}/${HABITS.toggle.length}`;
@@ -2661,6 +2774,7 @@ async function triggerAIAnalysis(dateStr, forceRegenerate = false) {
       extraNote: extraNote || ''
     };
     await dbPut('aiAnalysis', record);
+    scheduleCloudSync();
 
     // 分析完成后清空已发送的媒体附件
     currentAIMedia = [];
@@ -2849,22 +2963,11 @@ async function renderToday() {
   }
   
   // 计算进度
-  let totalEx = 0, doneEx = 0;
-  if (day.dayType === 'training' && day.groups) {
-    totalEx += PLAN_DATA.morningTemplate.exercises.length;
-    PLAN_DATA.morningTemplate.exercises.forEach(ex => { if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneEx++; });
-    if (!day.skipWarmup) {
-      totalEx += PLAN_DATA.warmupTemplate.exercises.length;
-      PLAN_DATA.warmupTemplate.exercises.forEach(ex => { if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneEx++; });
-    }
-    day.groups.forEach(group => group.exercises.forEach(ex => {
-      totalEx++;
-      if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneEx++;
-    }));
-  } else {
-    totalEx = PLAN_DATA.morningTemplate.exercises.length;
-    PLAN_DATA.morningTemplate.exercises.forEach(ex => { if (logs.find(l => l.exerciseId === ex.id && l.completed)) doneEx++; });
-  }
+  const countedExercises = getDayExerciseEntries(day)
+    .filter(ex => shouldCountExercise(ex, day, ex.sourceType));
+  const totalEx = countedExercises.length;
+  const doneEx = countedExercises
+    .filter(ex => logs.some(l => l.exerciseId === ex.id && l.completed)).length;
 
   const pct = totalEx > 0 ? Math.round(doneEx / totalEx * 100) : 0;
   const progressLabel = isToday ? '今日完成进度' : isPast ? '当日完成情况' : '计划动作数';
@@ -2886,12 +2989,14 @@ async function renderToday() {
 
   const readonly = isFuture;
   
-  html += await renderExerciseGroup({
-    title: PLAN_DATA.morningTemplate.name,
-    description: PLAN_DATA.morningTemplate.description,
-    duration: PLAN_DATA.morningTemplate.duration,
-    exercises: PLAN_DATA.morningTemplate.exercises
-  }, logs, readonly);
+  if (!day.skipMorning) {
+    html += await renderExerciseGroup({
+      title: PLAN_DATA.morningTemplate.name,
+      description: PLAN_DATA.morningTemplate.description,
+      duration: PLAN_DATA.morningTemplate.duration,
+      exercises: PLAN_DATA.morningTemplate.exercises
+    }, logs, readonly);
+  }
 
   if (day.dayType === 'training' && day.groups) {
     if (!day.skipWarmup) {
@@ -2922,12 +3027,13 @@ async function renderToday() {
     const todayHabits = await dbGet('dailyHabits', dateForHabits) || { date: dateForHabits, habits: {}, counters: {} };
 
     // 自动检测晨间重置完成状态
-    const morningExIds = PLAN_DATA.morningTemplate.exercises.map(ex => ex.id);
-    const allMorningDone = morningExIds.every(id => logs.find(l => l.exerciseId === id && l.completed));
+    const morningExIds = day.skipMorning ? [] : PLAN_DATA.morningTemplate.exercises.map(ex => ex.id);
+    const allMorningDone = morningExIds.length > 0 && morningExIds.every(id => logs.find(l => l.exerciseId === id && l.completed));
     // 如果晨间重置全部完成,自动勾选 h-morning 习惯
     if (allMorningDone && !todayHabits.habits['h-morning']) {
       todayHabits.habits['h-morning'] = true;
       await dbPut('dailyHabits', { ...todayHabits, date: dateForHabits });
+      scheduleCloudSync();
     }
 
     const habitsDone = HABITS.toggle.filter(h => todayHabits.habits[h.id]).length;
@@ -3016,12 +3122,12 @@ async function renderToday() {
         showToast('未来日期不可勾选');
         return;
       }
-      await toggleExerciseDone(el.dataset.exid, getViewingDateStr());
+      await toggleExerciseDone(el.dataset.exid, getViewingDateStr(), el.dataset.exname, el.dataset.movementId);
       renderToday();
     });
   });
   view.querySelectorAll('.action-btn[data-action="note"]').forEach(el => {
-    el.addEventListener('click', () => openNoteModal(el.dataset.exid, el.dataset.exname));
+    el.addEventListener('click', () => openNoteModal(el.dataset.exid, el.dataset.exname, el.dataset.movementId));
   });
   view.querySelectorAll('.action-btn[data-action="video"]').forEach(el => {
     el.addEventListener('click', () => openVideoModal(el.dataset.exname));
@@ -3035,6 +3141,7 @@ async function renderToday() {
       let data = await dbGet('dailyHabits', dateForHabits) || { date: dateForHabits, habits: {}, counters: {} };
       data.habits[habitId] = !data.habits[habitId];
       await dbPut('dailyHabits', data);
+      scheduleCloudSync();
       renderToday();
       // 同步习惯视图(如果之后切换过去)
     });
@@ -3049,6 +3156,7 @@ async function renderToday() {
       let data = await dbGet('dailyHabits', dateForHabits) || { date: dateForHabits, habits: {}, counters: {} };
       data.counters[counterId] = Math.max(0, (data.counters[counterId] || 0) + delta);
       await dbPut('dailyHabits', data);
+      scheduleCloudSync();
       renderToday();
     });
   });
@@ -3069,7 +3177,7 @@ async function renderExerciseGroup(group, logs, readonly = false) {
     const log = logs.find(l => l.exerciseId === ex.id);
     const done = log && log.completed;
     // v8.6: 按动作语义 key 聚合,跨周共享同一个动作的所有评论
-    const allNotes = await getNotesForKey(ex.name);
+    const allNotes = await getNotesForKey(ex.name, ex.movementId || null);
     const noteCount = allNotes.length;
     
     let lastNotePreview = '';
@@ -3104,17 +3212,18 @@ async function renderExerciseGroup(group, logs, readonly = false) {
       <div class="exercise-card${done ? ' done' : ''}${ex.superSet ? ' superset' : ''}">
         ${ex.superSet ? '<div class="superset-tag">↳ 超级组</div>' : ''}
         <div class="exercise-row">
-          <div class="checkbox${done ? ' checked' : ''}${readonly ? ' readonly' : ''}" data-exid="${ex.id}" style="${readonly ? 'opacity: 0.4; cursor: not-allowed;' : ''}"></div>
+          <div class="checkbox${done ? ' checked' : ''}${readonly ? ' readonly' : ''}" data-exid="${ex.id}" data-exname="${escHtml(ex.name)}" data-movement-id="${escHtml(ex.movementId || '')}" style="${readonly ? 'opacity: 0.4; cursor: not-allowed;' : ''}"></div>
           <div class="exercise-content">
             <div class="exercise-name">${escHtml(ex.name)}</div>
             <div class="exercise-meta">
               ${ex.sets ? `<span>📋 ${escHtml(ex.sets)}</span>` : ''}
               ${ex.weight ? `<span>⚖ ${escHtml(ex.weight)}</span>` : ''}
+              ${ex.countsTowardProgress === false ? '<span>◌ 不计完成率</span>' : ''}
             </div>
             ${ex.tip ? `<div class="exercise-tip">${escHtml(ex.tip)}</div>` : ''}
             ${lastNotePreview}
             <div class="exercise-actions">
-              <button class="action-btn ${noteCount > 0 ? 'has-content' : ''}" data-action="note" data-exid="${ex.id}" data-exname="${escHtml(ex.name)}">
+              <button class="action-btn ${noteCount > 0 ? 'has-content' : ''}" data-action="note" data-exid="${ex.id}" data-exname="${escHtml(ex.name)}" data-movement-id="${escHtml(ex.movementId || '')}">
                 📝 记录
                 ${noteCount > 0 ? `<span class="action-btn-count">${noteCount}</span>` : ''}
               </button>
@@ -3130,16 +3239,25 @@ async function renderExerciseGroup(group, logs, readonly = false) {
   return html;
 }
 
-async function toggleExerciseDone(exerciseId, dateStr) {
+async function toggleExerciseDone(exerciseId, dateStr, exerciseName = '', movementId = '') {
   const date = dateStr || todayStr();
   const logs = await dbGetByIndex('workoutLogs', 'date', date);
   const existing = logs.find(l => l.exerciseId === exerciseId);
   if (existing) {
     existing.completed = !existing.completed;
     existing.completedAt = existing.completed ? new Date().toISOString() : null;
+    if (exerciseName && !existing.exerciseKey) existing.exerciseKey = exerciseName;
+    if (movementId && !existing.movementId) existing.movementId = movementId;
     await dbPut('workoutLogs', existing);
   } else {
-    await dbAdd('workoutLogs', { date, exerciseId, completed: true, completedAt: new Date().toISOString() });
+    await dbAdd('workoutLogs', {
+      date,
+      exerciseId,
+      exerciseKey: exerciseName || exerciseIdToKey(exerciseId),
+      movementId: movementId || resolveMovementId(exerciseName, exerciseId) || undefined,
+      completed: true,
+      completedAt: new Date().toISOString()
+    });
   }
   scheduleCloudSync();
 }
@@ -3290,6 +3408,7 @@ async function toggleHabit(habitId) {
   let data = await dbGet('dailyHabits', today) || { date: today, habits: {}, counters: {} };
   data.habits[habitId] = !data.habits[habitId];
   await dbPut('dailyHabits', data);
+  scheduleCloudSync();
   renderHabits();
 }
 
@@ -3298,6 +3417,7 @@ async function changeCounter(habitId, delta) {
   let data = await dbGet('dailyHabits', today) || { date: today, habits: {}, counters: {} };
   data.counters[habitId] = Math.max(0, (data.counters[habitId] || 0) + delta);
   await dbPut('dailyHabits', data);
+  scheduleCloudSync();
   renderHabits();
 }
 
@@ -3367,6 +3487,7 @@ async function addMetric() {
   await dbAdd('bodyMetrics', {
     metricId, value: parseFloat(valueStr), date: todayStr(), createdAt: new Date().toISOString()
   });
+  scheduleCloudSync();
   showToast('已保存');
   document.getElementById('metric-value').value = '';
   renderMetrics();
@@ -3590,16 +3711,16 @@ async function renderSettings() {
       <div id="api-key-status"></div>
     </div>
     <div class="spacer-lg"></div>
-    <div class="section-title"><span>云同步 (供 Claude 读取)</span></div>
+    <div class="section-title"><span>云同步 (AWS 私有服务)</span></div>
     <div class="card">
-      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">同步地址 (Supabase 函数 URL)</div>
-      <input type="text" id="sync-url-input" value="" placeholder="https://xxx.supabase.co/functions/v1/sync" style="margin-bottom: 12px;">
+      <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">同步地址 (默认同源 AWS 接口)</div>
+      <input type="text" id="sync-url-input" value="" placeholder="/api/sync" style="margin-bottom: 12px;">
       <div style="font-size: 13px; color: var(--text-1); margin-bottom: 8px;">同步密钥</div>
       <div style="display: flex; gap: 8px;">
         <input type="password" id="sync-secret-input" value="" placeholder="" style="flex: 1;">
         <button style="padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px;" onclick="const i=document.getElementById('sync-secret-input'); i.type = i.type === 'password' ? 'text' : 'password'">👁</button>
       </div>
-      <div class="text-small text-dim" style="margin-top: 6px;">训练完成、联网时自动把数据同步到你的私有云，供 Claude 读取分析。仅存本地浏览器，不写入源码</div>
+      <div class="text-small text-dim" style="margin-top: 6px;">训练、习惯、体测或分析有变化后会自动同步。密钥只存本机，AI Key、同步密钥和接口地址均不会进入云端训练快照。</div>
       <div style="display: flex; gap: 8px; margin-top: 12px;">
         <button class="btn-primary" style="flex: 1;" onclick="saveSyncConfig()">保存</button>
         <button class="btn-secondary" style="flex: 1;" onclick="syncToCloud({silent:false})">立即同步</button>
@@ -3645,7 +3766,7 @@ async function renderSettings() {
     </div>
     <div class="ornament">∼ ∼ ∼</div>
     <div class="text-small text-dim" style="text-align: center;">
-      体态修复训练手册 · v1.1.0<br>
+      体态修复训练手册 · v${APP_VERSION}<br>
       「完成 80% > 完美 50%」
     </div>`;
   
@@ -3658,11 +3779,7 @@ async function renderSettings() {
       display.innerHTML = '⚠ 训练开始日期未设置, 进入今日训练页面后系统会自动设为本周一';
     } else {
       const wd = await getCurrentWeekDay();
-      const phaseName = wd.weekNum >= 15 ? 'Phase 3 目标期' 
-                      : wd.weekNum >= 11 ? 'Phase 2 渐进期'
-                      : wd.weekNum >= 7 ? 'Phase 1 对称巩固期'
-                      : wd.weekNum >= 3 ? 'Phase 0 基础激活期'
-                      : '尚未开始';
+      const phaseName = getWeekData(wd.weekNum)?.phase || '尚未开始';
       const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
       display.innerHTML = `
         <div><strong>📅 今天:</strong> Week ${wd.weekNum} · ${dayNames[wd.dayIdx]}</div>
@@ -3695,7 +3812,7 @@ async function renderSettings() {
   // 云同步配置回填
   const syncUrlInput = document.getElementById('sync-url-input');
   const syncSecretInput = document.getElementById('sync-secret-input');
-  if (syncUrlInput) syncUrlInput.value = (await getSetting('syncUrl')) || '';
+  if (syncUrlInput) syncUrlInput.value = normalizeSyncUrl(await getSetting('syncUrl'));
   if (syncSecretInput) syncSecretInput.value = (await getSetting('syncSecret')) || '';
   updateSyncStatus();
 }
@@ -3717,87 +3834,526 @@ function onProviderChange() {
 }
 
 // ============================================================
-// 云同步（Supabase）—— 训练完成 / 联网时自动推送整份数据快照
-// 配置（同步地址 + 密钥）只存本地设置，不写入源码（本仓库公开）
+// 云同步（AWS）—— 数据变化后自动推送整份无媒体快照。
+// 配置（同步地址 + 密钥）只存本地设置，不写入源码（本仓库公开）。
 // ============================================================
+const DEFAULT_SYNC_URL = '/api/sync';
+const SYNC_REVISION_KEY = 'healthySyncRevision';
+const SYNC_ACK_REVISION_KEY = 'healthySyncAckRevision';
+const SYNC_DIRTY_TOKEN_KEY = 'healthySyncDirtyToken';
+const SYNC_ERROR_KEY = 'healthySyncLastError';
+const SYNC_ETAG_KEY = 'healthySyncEtag';
+const SYNC_CONFLICT_ETAG_KEY = 'healthySyncConflictEtag';
+const SYNC_CONFLICT_INFO_KEY = 'healthySyncConflictInfo';
+const SYNC_BLOCKED_KEY = 'healthySyncBlocked';
+const SYNC_RETRY_COUNT_KEY = 'healthySyncRetryCount';
+const SYNC_NEXT_RETRY_AT_KEY = 'healthySyncNextRetryAt';
+const SYNC_SAFE_SETTING_KEYS = new Set(['startDate', 'aiProvider', 'aiModel']);
+const SYNC_COUNT_FIELDS = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'aiAnalysis'];
 let _syncTimer = null;
 let _syncing = false;
-let _syncDirty = false;
+let _syncRevision = Number(localStorage.getItem(SYNC_REVISION_KEY) || 0);
+let _syncAckRevision = Number(localStorage.getItem(SYNC_ACK_REVISION_KEY) || 0);
+let _syncDirtyToken = localStorage.getItem(SYNC_DIRTY_TOKEN_KEY) || '';
+let _syncDirty = Boolean(_syncDirtyToken) || _syncRevision > _syncAckRevision;
+let _syncBlocked = localStorage.getItem(SYNC_BLOCKED_KEY) || '';
+let _syncRetryCount = Number(localStorage.getItem(SYNC_RETRY_COUNT_KEY) || 0);
+let _syncTokenCounter = 0;
+
+function normalizeSyncUrl(rawUrl) {
+  const value = (rawUrl || '').trim();
+  if (!value) return DEFAULT_SYNC_URL;
+  try {
+    const parsed = new URL(value, window.location.href);
+    if (parsed.hostname.endsWith('.supabase.co') && parsed.pathname.includes('/functions/v1/sync')) {
+      return DEFAULT_SYNC_URL;
+    }
+    if (parsed.pathname.endsWith('/api/sync/')) {
+      parsed.pathname = parsed.pathname.slice(0, -1);
+      return value.startsWith('/') ? `${parsed.pathname}${parsed.search}${parsed.hash}` : parsed.toString();
+    }
+  } catch (e) {
+    return value;
+  }
+  return value;
+}
+
+function isValidSyncUrl(url) {
+  if (url.startsWith('/')) return !url.startsWith('//');
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname));
+  } catch (e) {
+    return false;
+  }
+}
+
+function refreshSyncStateFromStorage() {
+  _syncRevision = Math.max(_syncRevision, Number(localStorage.getItem(SYNC_REVISION_KEY) || 0));
+  _syncAckRevision = Math.max(_syncAckRevision, Number(localStorage.getItem(SYNC_ACK_REVISION_KEY) || 0));
+  _syncDirtyToken = localStorage.getItem(SYNC_DIRTY_TOKEN_KEY) || '';
+  _syncDirty = Boolean(_syncDirtyToken) || _syncRevision > _syncAckRevision;
+  _syncBlocked = localStorage.getItem(SYNC_BLOCKED_KEY) || '';
+}
+
+function newSyncDirtyToken() {
+  _syncTokenCounter += 1;
+  const randomPart = window.crypto?.randomUUID
+    ? window.crypto.randomUUID()
+    : `${Math.random().toString(36).slice(2)}-${performance.now().toString(36)}`;
+  return `${Date.now().toString(36)}-${_syncTokenCounter.toString(36)}-${randomPart}`;
+}
+
+function clearSyncRetryState({ keepEtag = true } = {}) {
+  _syncBlocked = '';
+  _syncRetryCount = 0;
+  localStorage.removeItem(SYNC_BLOCKED_KEY);
+  localStorage.removeItem(SYNC_CONFLICT_ETAG_KEY);
+  localStorage.removeItem(SYNC_CONFLICT_INFO_KEY);
+  localStorage.removeItem(SYNC_RETRY_COUNT_KEY);
+  localStorage.removeItem(SYNC_NEXT_RETRY_AT_KEY);
+  if (!keepEtag) localStorage.removeItem(SYNC_ETAG_KEY);
+}
+
+function scheduleSyncRetry(minimumDelayMs = 0) {
+  if (!_syncDirty || !navigator.onLine || _syncBlocked) return;
+  _syncRetryCount += 1;
+  localStorage.setItem(SYNC_RETRY_COUNT_KEY, String(_syncRetryCount));
+  const exponentialDelay = Math.min(5 * 60 * 1000, 5000 * (2 ** Math.min(_syncRetryCount - 1, 6)));
+  const delay = Math.max(minimumDelayMs, exponentialDelay) + Math.floor(Math.random() * 1000);
+  localStorage.setItem(SYNC_NEXT_RETRY_AT_KEY, String(Date.now() + delay));
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => syncToCloud({ silent: true }), delay);
+}
+
+function syncFailurePolicy(status) {
+  if ([408, 425, 429].includes(status) || status >= 500) return { retryable: true, blocked: '' };
+  if ([412, 428].includes(status)) return { retryable: false, blocked: 'conflict' };
+  if ([401, 403].includes(status)) return { retryable: false, blocked: 'auth' };
+  return { retryable: false, blocked: 'request' };
+}
+
+function snapshotUrlForSync(syncUrl) {
+  const url = new URL(syncUrl, window.location.href);
+  url.pathname = url.pathname.replace(/\/api\/sync\/?$/, '/api/snapshot');
+  return url.toString();
+}
+
+function syncCounts(snapshot) {
+  return Object.fromEntries(SYNC_COUNT_FIELDS.map(field => [field, Array.isArray(snapshot?.[field]) ? snapshot[field].length : 0]));
+}
+
+function compactSyncCounts(counts) {
+  if (!counts) return '无摘要';
+  return `训练 ${counts.workoutLogs || 0}、笔记 ${counts.exerciseNotes || 0}、习惯 ${counts.dailyHabits || 0}、体测 ${counts.bodyMetrics || 0}、AI ${counts.aiAnalysis || 0}`;
+}
+
+function syncCountDifference(remoteCounts, localCounts) {
+  if (!remoteCounts || !localCounts) return '无法比较';
+  const labels = { workoutLogs: '训练', exerciseNotes: '笔记', dailyHabits: '习惯', bodyMetrics: '体测', aiAnalysis: 'AI' };
+  const parts = Object.keys(labels).map(field => {
+    const delta = (localCounts[field] || 0) - (remoteCounts[field] || 0);
+    return delta === 0 ? null : `${labels[field]} ${delta > 0 ? '+' : ''}${delta}`;
+  }).filter(Boolean);
+  return parts.length ? parts.join('、') : '各类条数相同（内容仍可能不同）';
+}
+
+function syncProtocolError(message) {
+  const error = new Error(message);
+  error.status = 200;
+  error.retryable = false;
+  error.blocked = 'request';
+  return error;
+}
+
+async function sha256Hex(text) {
+  if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') {
+    throw syncProtocolError('当前浏览器不支持同步回执校验');
+  }
+  const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function validateSyncReceipt(receipt, responseEtag, requestSha256, requestPayload) {
+  if (!receipt || receipt.ok !== true || !receipt.syncedAt) {
+    throw syncProtocolError('服务端未返回有效同步确认');
+  }
+  if (!/^[0-9a-f]{64}$/i.test(receipt.requestSha256 || '') || receipt.requestSha256.toLowerCase() !== requestSha256) {
+    throw syncProtocolError('服务端回执与本次提交不一致');
+  }
+  if (!Array.isArray(receipt.strippedSettings) || receipt.strippedSettings.length !== 0) {
+    throw syncProtocolError('服务端未完整接受安全设置，未确认同步');
+  }
+  const expectedCounts = syncCounts(requestPayload);
+  if (!receipt.counts || SYNC_COUNT_FIELDS.some(field => receipt.counts[field] !== expectedCounts[field])) {
+    throw syncProtocolError('服务端回执条数与本次提交不一致');
+  }
+  const etagMatch = typeof responseEtag === 'string' && responseEtag.match(/^"([0-9a-f]{64})"$/i);
+  if (!etagMatch || !/^[0-9a-f]{64}$/i.test(receipt.payloadSha256 || '') ||
+      etagMatch[1].toLowerCase() !== receipt.payloadSha256.toLowerCase()) {
+    throw syncProtocolError('服务端未返回可校验的数据版本');
+  }
+}
+
+async function fetchCloudSnapshot(syncUrl, secret) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(snapshotUrlForSync(syncUrl), {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${secret}`, 'Accept': 'application/json' },
+      signal: controller.signal
+    });
+    const text = await res.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (e) { /* 下方统一报错 */ }
+    if (!res.ok || !body || body.ok !== true || !body.snapshot) throw new Error(`读取云端快照失败（HTTP ${res.status}）`);
+    const etag = res.headers.get('ETag') || '';
+    const etagMatch = etag.match(/^"([0-9a-f]{64})"$/i);
+    if (!etagMatch || !/^[0-9a-f]{64}$/i.test(body.payloadSha256 || '') ||
+        etagMatch[1].toLowerCase() !== body.payloadSha256.toLowerCase()) {
+      throw new Error('云端快照缺少可校验的数据版本');
+    }
+    return {
+      etag,
+      snapshot: body.snapshot,
+      updatedAt: body.updatedAt || body.syncedAt || null,
+      exportedAt: body.exportedAt || body.snapshot.exportedAt || null,
+      appVersion: body.appVersion || body.snapshot.appVersion || null,
+      serverRevision: body.serverRevision ?? null,
+      counts: body.counts || syncCounts(body.snapshot)
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function saveCloudConflictInfo(remote, responseEtag, localPayload) {
+  const etag = remote.etag || responseEtag || '';
+  if (!etag) throw new Error('云端未提供可校验版本号');
+  const info = {
+    etag,
+    updatedAt: remote.updatedAt,
+    exportedAt: remote.exportedAt,
+    appVersion: remote.appVersion,
+    serverRevision: remote.serverRevision,
+    remoteCounts: remote.counts,
+    localCounts: syncCounts(localPayload),
+    localExportedAt: localPayload?.exportedAt || new Date().toISOString(),
+    inspectedAt: new Date().toISOString()
+  };
+  localStorage.setItem(SYNC_CONFLICT_ETAG_KEY, etag);
+  localStorage.setItem(SYNC_CONFLICT_INFO_KEY, JSON.stringify(info));
+  return info;
+}
+
+async function captureCloudConflict(syncUrl, secret, responseEtag, localPayload) {
+  const remote = await fetchCloudSnapshot(syncUrl, secret);
+  return saveCloudConflictInfo(remote, responseEtag, localPayload);
+}
+
+async function downloadCloudConflictSnapshot() {
+  const url = normalizeSyncUrl(await getSetting('syncUrl'));
+  const secret = await getSetting('syncSecret');
+  if (!url || !secret) { showToast('请先填写同步地址和密钥'); return; }
+  try {
+    const remote = await fetchCloudSnapshot(url, secret);
+    if (_syncBlocked === 'conflict') {
+      const localPayload = await assembleSyncPayload();
+      saveCloudConflictInfo(remote, remote.etag, localPayload);
+      updateSyncStatus();
+    }
+    const blob = new Blob([JSON.stringify(remote.snapshot, null, 2)], { type: 'application/json' });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = `healthy-cloud-backup-${todayStr()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+    showToast('✓ 云端快照已导出，尚未覆盖');
+  } catch (e) {
+    showToast(e.name === 'AbortError' ? '读取云端快照超时' : e.message);
+  }
+}
+
+function markCloudSyncDirty() {
+  refreshSyncStateFromStorage();
+  _syncRevision = Math.max(_syncRevision + 1, _syncAckRevision + 1, 1);
+  _syncDirtyToken = newSyncDirtyToken();
+  localStorage.setItem(SYNC_REVISION_KEY, String(_syncRevision));
+  localStorage.setItem(SYNC_DIRTY_TOKEN_KEY, _syncDirtyToken);
+  _syncDirty = true;
+}
+
+async function ensureAwsSyncConfig() {
+  const stored = await getSetting('syncUrl');
+  const normalized = normalizeSyncUrl(stored);
+  if (stored !== normalized) {
+    await setSetting('syncUrl', normalized);
+    // 旧实例仍指向已停用的 Supabase；迁移后必须补推一次完整快照。
+    if (stored) {
+      clearSyncRetryState({ keepEtag: false });
+      markCloudSyncDirty();
+    }
+  }
+  return normalized;
+}
 
 async function assembleSyncPayload() {
   // 与 exportJSON 同构，但不含 media blob（体积大，远端分析用不上），
-  // 且剔除 syncSecret，避免把密钥本身推上云
+  // settings 采用白名单，确保 AI Key、同步密钥、地址与内部状态永不上传。
   return {
     exportedAt: new Date().toISOString(),
-    appVersion: '1.1.0',
+    appVersion: APP_VERSION,
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
     bodyMetrics: await dbGetAll('bodyMetrics'),
-    settings: (await dbGetAll('settings')).filter(s => s.key !== 'syncSecret'),
+    settings: (await dbGetAll('settings'))
+      .filter(s => SYNC_SAFE_SETTING_KEYS.has(s.key))
+      .map(s => ({ key: s.key, value: s.value })),
     aiAnalysis: await dbGetAll('aiAnalysis')
   };
 }
 
 async function syncToCloud({ silent = true } = {}) {
-  const url = await getSetting('syncUrl');
+  refreshSyncStateFromStorage();
+  const url = normalizeSyncUrl(await getSetting('syncUrl'));
   const secret = await getSetting('syncSecret');
-  if (!url || !secret) { if (!silent) showToast('请先填写同步地址和密钥'); return; }
-  if (!navigator.onLine) { _syncDirty = true; if (!silent) showToast('当前离线，联网后会自动同步'); return; }
-  if (_syncing) return;
+  if (!url || !secret) { if (!silent) showToast('请先填写同步地址和密钥'); return { ok: false, reason: 'not-configured' }; }
+  if (_syncBlocked && silent) return { ok: false, reason: `blocked-${_syncBlocked}` };
+  if (!navigator.onLine) {
+    if (!silent) showToast('当前离线，联网后会自动同步');
+    return { ok: false, reason: 'offline' };
+  }
+
+  let etag = localStorage.getItem(SYNC_ETAG_KEY) || '';
+  let preparedPayload = null;
+  let preparedRevision = null;
+  let preparedDirtyToken = null;
+  if (_syncBlocked === 'conflict' && !silent) {
+    let conflictEtag = localStorage.getItem(SYNC_CONFLICT_ETAG_KEY) || '';
+    let conflictInfo = null;
+    try { conflictInfo = JSON.parse(localStorage.getItem(SYNC_CONFLICT_INFO_KEY) || 'null'); } catch (e) { /* 视为缺失 */ }
+    try {
+      // 确认摘要和实际 POST 使用同一份冻结 payload；确认期间的新编辑仍会保持待同步。
+      refreshSyncStateFromStorage();
+      preparedRevision = _syncRevision;
+      preparedDirtyToken = _syncDirtyToken;
+      preparedPayload = await assembleSyncPayload();
+      if (!conflictEtag || !conflictInfo) {
+        conflictInfo = await captureCloudConflict(url, secret, conflictEtag, preparedPayload);
+        conflictEtag = conflictInfo.etag;
+      } else {
+        conflictInfo.localCounts = syncCounts(preparedPayload);
+        conflictInfo.localExportedAt = preparedPayload.exportedAt;
+        localStorage.setItem(SYNC_CONFLICT_INFO_KEY, JSON.stringify(conflictInfo));
+      }
+    } catch (inspectError) {
+      localStorage.removeItem(SYNC_CONFLICT_INFO_KEY);
+      updateSyncStatus();
+      showToast(inspectError.name === 'AbortError' ? '读取云端摘要超时，尚未覆盖' : `${inspectError.message}，尚未覆盖`);
+      return { ok: false, reason: 'conflict-inspection-failed' };
+    }
+    if (!conflictEtag || !conflictInfo) {
+      showToast('尚未安全读取云端摘要，不能覆盖；请稍后重试');
+      return { ok: false, reason: 'conflict-without-etag' };
+    }
+    const cloudTime = conflictInfo.updatedAt ? new Date(conflictInfo.updatedAt).toLocaleString() : '未知';
+    const localTime = conflictInfo.localExportedAt ? new Date(conflictInfo.localExportedAt).toLocaleString() : '未知';
+    const confirmed = window.confirm(
+      `云端已有另一份快照（版本 ${conflictInfo.serverRevision ?? '未知'}，更新于 ${cloudTime}）。\n` +
+      `云端：${compactSyncCounts(conflictInfo.remoteCounts)}\n` +
+      `本机：${compactSyncCounts(conflictInfo.localCounts)}（本次快照 ${localTime}）\n` +
+      `条数差异：${syncCountDifference(conflictInfo.remoteCounts, conflictInfo.localCounts)}\n\n` +
+      '建议先点“导出云端快照”留底。是否仍确认用这台设备的完整数据覆盖云端？'
+    );
+    if (!confirmed) return { ok: false, reason: 'conflict-cancelled' };
+    etag = conflictEtag;
+    clearSyncRetryState();
+    localStorage.setItem(SYNC_ETAG_KEY, conflictEtag);
+  } else if (_syncBlocked && !silent) {
+    // 永久错误不会自动刷接口；用户手动重试或保存新配置时才重新验证。
+    clearSyncRetryState();
+  }
+  if (_syncing) return { ok: false, reason: 'busy' };
+  clearTimeout(_syncTimer);
+  _syncTimer = null;
   _syncing = true;
+  if (!preparedPayload) refreshSyncStateFromStorage();
+  const requestRevision = preparedRevision ?? _syncRevision;
+  const requestDirtyToken = preparedPayload ? preparedDirtyToken : _syncDirtyToken;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  let nextRetryDelayMs = 0;
+  let requestPayload = preparedPayload;
   try {
-    const payload = await assembleSyncPayload();
+    if (!requestPayload) requestPayload = await assembleSyncPayload();
+    const requestBody = JSON.stringify(requestPayload);
+    const requestSha256 = await sha256Hex(requestBody);
+    const headers = { 'Authorization': `Bearer ${secret}`, 'Content-Type': 'application/json' };
+    if (etag) headers['If-Match'] = etag;
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${secret}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers,
+      body: requestBody,
+      signal: controller.signal
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    _syncDirty = false;
-    await setSetting('lastSyncAt', new Date().toISOString());
+    const responseText = await res.text();
+    let receipt = null;
+    try { receipt = responseText ? JSON.parse(responseText) : null; } catch (e) { /* 下方统一报错 */ }
+    if (!res.ok) {
+      const policy = syncFailurePolicy(res.status);
+      const error = new Error(`HTTP ${res.status}`);
+      error.status = res.status;
+      error.retryable = policy.retryable;
+      error.blocked = policy.blocked;
+      error.responseEtag = res.headers.get('ETag') || '';
+      const retryAfter = Number(res.headers.get('Retry-After'));
+      error.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
+      throw error;
+    }
+    const responseEtag = res.headers.get('ETag') || '';
+    validateSyncReceipt(receipt, responseEtag, requestSha256, requestPayload);
+
+    _syncAckRevision = Math.max(
+      _syncAckRevision,
+      Number(localStorage.getItem(SYNC_ACK_REVISION_KEY) || 0),
+      requestRevision
+    );
+    localStorage.setItem(SYNC_ACK_REVISION_KEY, String(_syncAckRevision));
+    const currentDirtyToken = localStorage.getItem(SYNC_DIRTY_TOKEN_KEY) || '';
+    if (requestDirtyToken && currentDirtyToken === requestDirtyToken) {
+      localStorage.removeItem(SYNC_DIRTY_TOKEN_KEY);
+    }
+    refreshSyncStateFromStorage();
+    clearSyncRetryState();
+    localStorage.removeItem(SYNC_ERROR_KEY);
+    if (responseEtag) localStorage.setItem(SYNC_ETAG_KEY, responseEtag);
+    await setSetting('lastSyncAt', receipt.syncedAt);
+    await setSetting('lastSyncReceipt', {
+      syncedAt: receipt.syncedAt,
+      serverRevision: receipt.serverRevision || null,
+      payloadSha256: receipt.payloadSha256 || null,
+      counts: receipt.counts || null,
+      etag: responseEtag || null
+    });
     updateSyncStatus();
     if (!silent) showToast('✓ 已同步到云端');
+    return receipt;
   } catch (e) {
-    _syncDirty = true;
+    refreshSyncStateFromStorage();
+    const message = e.name === 'AbortError' ? '请求超时（15秒）' : e.message;
+    localStorage.setItem(SYNC_ERROR_KEY, message);
+    const isTransportFailure = e.name === 'AbortError' || typeof e.status !== 'number';
+    const retryable = isTransportFailure || e.retryable === true;
+    nextRetryDelayMs = e.retryAfterMs || 0;
+    if (!retryable) {
+      _syncBlocked = e.blocked || 'request';
+      localStorage.setItem(SYNC_BLOCKED_KEY, _syncBlocked);
+      if (_syncBlocked === 'conflict' && e.responseEtag) {
+        localStorage.setItem(SYNC_CONFLICT_ETAG_KEY, e.responseEtag);
+      }
+      if (_syncBlocked === 'conflict') {
+        try {
+          await captureCloudConflict(url, secret, e.responseEtag || '', requestPayload);
+        } catch (inspectError) {
+          localStorage.removeItem(SYNC_CONFLICT_INFO_KEY);
+          console.error('读取云端冲突摘要失败', inspectError);
+        }
+      }
+    }
     console.error('云同步失败', e);
-    if (!silent) showToast('同步失败: ' + e.message);
+    updateSyncStatus();
+    if (!silent) showToast('同步失败: ' + message);
+    return { ok: false, reason: message, retryable, retryAfterMs: e.retryAfterMs || 0 };
   } finally {
+    clearTimeout(timeoutId);
     _syncing = false;
+    if (_syncDirty && navigator.onLine && !_syncBlocked) {
+      scheduleSyncRetry(nextRetryDelayMs);
+    }
   }
 }
 
-// 防抖：训练完成/记录后 8 秒内无新动作再推，避免连点狂发请求
+// 防抖：任何数据变更都先持久化 revision；即使刷新/PWA 被挂起，下次启动仍会补推。
 function scheduleCloudSync() {
-  _syncDirty = true;
+  markCloudSyncDirty();
+  if (_syncBlocked) {
+    updateSyncStatus();
+    return;
+  }
   clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(() => syncToCloud({ silent: true }), 8000);
+  _syncTimer = setTimeout(() => syncToCloud({ silent: true }), 3000);
 }
 
 async function saveSyncConfig() {
-  const url = document.getElementById('sync-url-input')?.value.trim() || '';
+  const url = normalizeSyncUrl(document.getElementById('sync-url-input')?.value || '');
   const secret = document.getElementById('sync-secret-input')?.value.trim() || '';
+  if (!isValidSyncUrl(url)) {
+    showToast('同步地址无效；请使用 /api/sync 或 HTTPS 地址');
+    return;
+  }
+  const previousUrl = normalizeSyncUrl(await getSetting('syncUrl'));
   await setSetting('syncUrl', url);
   await setSetting('syncSecret', secret);
-  showToast(url && secret ? '✓ 云同步已配置' : '云同步已清除');
-  if (url && secret) syncToCloud({ silent: false });
+  clearSyncRetryState({ keepEtag: previousUrl === url });
+  localStorage.removeItem(SYNC_ERROR_KEY);
+  if (secret) {
+    markCloudSyncDirty();
+    showToast('✓ 云同步已配置，正在验证');
+    syncToCloud({ silent: false });
+  } else {
+    showToast('同步密钥已清除');
+    updateSyncStatus();
+  }
 }
 
 async function updateSyncStatus() {
   const el = document.getElementById('sync-status');
   if (!el) return;
-  const url = await getSetting('syncUrl');
+  const url = normalizeSyncUrl(await getSetting('syncUrl'));
   if (!url) { el.innerHTML = ''; return; }
   const last = await getSetting('lastSyncAt');
-  el.innerHTML = last
-    ? `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 上次同步: ${new Date(last).toLocaleString()}</div>`
-    : `<div style="margin-top: 8px; font-size: 12px; color: var(--text-2);">尚未同步</div>`;
+  const error = localStorage.getItem(SYNC_ERROR_KEY);
+  if (_syncBlocked === 'conflict') {
+    let info = null;
+    try { info = JSON.parse(localStorage.getItem(SYNC_CONFLICT_INFO_KEY) || 'null'); } catch (e) { /* 视为缺失 */ }
+    const cloudSummary = info
+      ? `<br>云端版本: ${info.serverRevision ?? '未知'} · 更新时间: ${info.updatedAt ? new Date(info.updatedAt).toLocaleString() : '未知'}<br>云端: ${escHtml(compactSyncCounts(info.remoteCounts))}<br>本机: ${escHtml(compactSyncCounts(info.localCounts))}${info.localExportedAt ? ` · 快照 ${new Date(info.localExportedAt).toLocaleString()}` : ''}<br>差异: ${escHtml(syncCountDifference(info.remoteCounts, info.localCounts))}`
+      : '<br>云端摘要读取失败，当前禁止覆盖。';
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--warn);">⚠ 云端存在另一份快照，已停止自动覆盖。${cloudSummary}${last ? `<br>本机记录的上次成功: ${new Date(last).toLocaleString()}` : ''}<br><button class="btn-secondary" style="margin-top:8px;padding:6px 10px;" onclick="downloadCloudConflictSnapshot()">导出云端快照</button><br>确认留底和本机数据完整后，再点“立即同步”并确认覆盖。</div>`;
+  } else if (_syncBlocked === 'auth') {
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--bad);">⚠ 鉴权失败，已停止自动重试。请检查同步地址和密钥后保存。${last ? `<br>上次成功: ${new Date(last).toLocaleString()}` : ''}</div>`;
+  } else if (_syncBlocked) {
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--bad);">⚠ 请求无法被服务端接受，已停止自动重试${error ? ` · ${escHtml(error)}` : ''}。请检查配置或应用版本。</div>`;
+  } else if (_syncDirty) {
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--warn);">⏳ 有待同步变更${error ? ` · ${escHtml(error)}` : ''}${last ? `<br>上次成功: ${new Date(last).toLocaleString()}` : ''}</div>`;
+  } else if (last) {
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--good);">✓ 上次同步: ${new Date(last).toLocaleString()}</div>`;
+  } else {
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--text-2);">尚未同步</div>`;
+  }
 }
 
-// 联网恢复 / 切到后台时补推
+// 联网恢复、回到前台或即将进入后台时补推。
 window.addEventListener('online', () => { if (_syncDirty) syncToCloud({ silent: true }); });
+window.addEventListener('storage', event => {
+  if (![SYNC_REVISION_KEY, SYNC_ACK_REVISION_KEY, SYNC_DIRTY_TOKEN_KEY, SYNC_BLOCKED_KEY].includes(event.key)) return;
+  refreshSyncStateFromStorage();
+  updateSyncStatus();
+  if (_syncDirty && navigator.onLine && !_syncBlocked) {
+    clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(async () => {
+      if (await getSetting('syncSecret')) syncToCloud({ silent: true });
+    }, 3000);
+  }
+});
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && _syncDirty) { clearTimeout(_syncTimer); syncToCloud({ silent: true }); }
+  if (_syncDirty && !_syncBlocked) {
+    clearTimeout(_syncTimer);
+    syncToCloud({ silent: true });
+  }
 });
 
 // 校验 AI 配置是否可用：用一个最小请求探测，按 HTTP 状态判断
@@ -3850,6 +4406,7 @@ async function saveAIConfig() {
     await setSetting('aiProvider', providerId);
     await setSetting('aiApiKey', '');
     await setSetting('aiModel', model);
+    scheduleCloudSync();
     setStatus('');
     showToast('API Key 已清除');
     renderSettings();
@@ -3880,12 +4437,14 @@ async function saveAIConfig() {
   await setSetting('aiProvider', providerId);
   await setSetting('aiApiKey', key);
   await setSetting('aiModel', model);
+  scheduleCloudSync();
   setStatus(`<div style="margin-top:10px;color:var(--good);font-size:12px;line-height:1.6;">✅ ${escHtml(result.warn || provider.name + ' 校验通过，配置已保存')}</div>`);
   showToast(result.warn ? '已保存（有提示）' : `${provider.name} 配置已保存`);
 }
 
 async function updateStartDate(date) {
   await setSetting('startDate', date);
+  scheduleCloudSync();
   showToast('已更新训练开始日期');
 }
 
@@ -3974,6 +4533,7 @@ function testImportURL() {
 // ============================================================
 let currentNoteExerciseId = null;
 let currentNoteExerciseName = '';
+let currentNoteMovementId = '';
 let currentNoteMedia = [];
 const noteDraftCache = new Map();
 
@@ -4224,7 +4784,7 @@ function formatNoteDisplay(note) {
   return `<div class="note-item-text">${escHtml(note.text)}</div>`;
 }
 
-async function openNoteModal(exerciseId, exerciseName) {
+async function openNoteModal(exerciseId, exerciseName, movementId = '') {
   const modal = document.getElementById('note-modal');
   if (currentNoteExerciseId && modal.classList.contains('show')) {
     saveNoteDraftToCache(currentNoteExerciseId, currentNoteExerciseName);
@@ -4232,13 +4792,14 @@ async function openNoteModal(exerciseId, exerciseName) {
 
   currentNoteExerciseId = exerciseId;
   currentNoteExerciseName = exerciseName;
+  currentNoteMovementId = movementId || resolveMovementId(exerciseName, exerciseId) || '';
   const draftKey = noteDraftKey(exerciseId, exerciseName);
   const cachedDraft = noteDraftCache.get(draftKey);
   currentNoteMedia = cachedDraft?.media ? cachedDraft.media.map(m => ({ ...m })) : [];
 
   document.getElementById('note-modal-title').innerHTML = `${escHtml(exerciseName)} <small>动作记录</small>`;
 
-  const notes = await getNotesForKey(exerciseName);
+  const notes = await getNotesForKey(exerciseName, currentNoteMovementId || null);
   notes.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   const allExercises = getAllExercises();
@@ -4474,6 +5035,7 @@ async function saveNote() {
   const noteData = {
     exerciseId: currentNoteExerciseId,
     exerciseKey: currentNoteExerciseName || exerciseIdToKey(currentNoteExerciseId),
+    movementId: currentNoteMovementId || resolveMovementId(currentNoteExerciseName, currentNoteExerciseId) || undefined,
     text,
     createdAt: new Date().toISOString()
   };
@@ -4520,7 +5082,8 @@ async function deleteNote(noteId) {
   await dbDelete('exerciseNotes', noteId);
   const mediaItems = await dbGetByIndex('media', 'noteId', noteId);
   for (const m of mediaItems) await dbDelete('media', m.id);
-  openNoteModal(currentNoteExerciseId, currentNoteExerciseName);
+  scheduleCloudSync();
+  openNoteModal(currentNoteExerciseId, currentNoteExerciseName, currentNoteMovementId);
 }
 
 function closeNoteModal(event) {
@@ -4531,6 +5094,7 @@ function closeNoteModal(event) {
   document.getElementById('note-modal').classList.remove('show');
   currentNoteExerciseId = null;
   currentNoteExerciseName = '';
+  currentNoteMovementId = '';
   currentNoteMedia = [];
 }
 
@@ -4642,7 +5206,7 @@ function closeVideoModal(event) {
 async function exportJSON() {
   const data = {
     exportedAt: new Date().toISOString(),
-    appVersion: "1.1.0",
+    appVersion: APP_VERSION,
     workoutLogs: await dbGetAll('workoutLogs'),
     exerciseNotes: await dbGetAll('exerciseNotes'),
     dailyHabits: await dbGetAll('dailyHabits'),
@@ -4722,7 +5286,7 @@ async function generateAIReport() {
   const today = todayStr();
   const { weekNum } = await getCurrentWeekDay();
   
-  let md = `# 体态修复训练数据汇总\n\n`;
+  let md = `# 训练与体态数据汇总\n\n`;
   md += `**生成日期**: ${today}\n`;
   if (startDate) md += `**训练开始日期**: ${startDate}\n`;
   md += `**当前周次**: Week ${weekNum}\n\n`;
@@ -4782,12 +5346,11 @@ async function generateAIReport() {
   }
   
   md += `## 五、当前训练计划上下文\n\n`;
-  md += `用户在执行 v4.1 体态修复 16 周计划。诊断包括:\n`;
-  md += `- 上交叉综合征(肩胛稳定差、上斜方紧、富贵包、圆肩)\n`;
-  md += `- 核心稳定不足、放松态小腹突出\n`;
-  md += `- 臀中肌弱、足弓/踝稳定差、O 型腿\n`;
-  md += `- 全身肌肉偏弱\n\n`;
-  md += `当前在 Phase 0(感知期 + 基础激活期)，目标是建立动作模式、激活薄弱环节、培养习惯。\n`;
+  const currentWeekData = getWeekData(weekNum);
+  md += `应用版本：v${APP_VERSION}；计划版本：${currentWeekData?.planVersion ? 'V' + currentWeekData.planVersion : '历史计划'}。\n`;
+  md += `当前阶段：${currentWeekData?.phase || `Week ${weekNum}（计划范围外）`}。\n`;
+  md += `目标：以同设备15%体脂为中心，在肩腰症状不升级的前提下，均衡发展胸背肩与臀腿，提升引体、水平推、深蹲和髋铰链能力，并改善可训练的日常步态控制。\n`;
+  md += `注意：肱骨前移、O型腿和摆腿画弧均为观察描述，不作为医学诊断；杠铃日志中的重量为片重，分析总重时需另加20kg杠铃杆。\n`;
   
   return md;
 }
@@ -4990,6 +5553,7 @@ async function importJSON(event) {
       resultMsg += `\n⚠ 错误 ${errors.length} 条:\n${errors.slice(0, 5).join('\n')}`;
     }
     alert(resultMsg);
+    scheduleCloudSync();
     setTimeout(() => location.reload(), 500);
   } catch (e) {
     alert('导入失败: ' + e.message);
@@ -5108,7 +5672,10 @@ async function diagnoseData() {
 
 async function clearAllData() {
   if (!confirm('真的要清空所有数据吗?此操作不可恢复!')) return;
-  if (!confirm('再次确认:这会删除所有训练记录、习惯打卡、体测数据、动作记录、媒体文件。建议先导出备份。')) return;
+  if (!confirm('再次确认:这会删除本机所有训练记录、习惯打卡、体测数据、动作记录、AI 分析和媒体文件；如已配置云同步，也会用空快照清空云端数据。同步配置与计划起始日会保留，建议先导出备份。')) return;
+  const preservedSyncUrl = await getSetting('syncUrl');
+  const preservedSyncSecret = await getSetting('syncSecret');
+  const preservedStartDate = await getSetting('startDate') || PLAN_DATA.startDate;
   const stores = ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'aiAnalysis', 'media'];
   for (const store of stores) {
     const all = await dbGetAll(store);
@@ -5116,9 +5683,23 @@ async function clearAllData() {
       const key = (store === 'dailyHabits' || store === 'aiAnalysis') ? item.date : (store === 'settings' ? item.key : item.id);
       await dbDelete(store, key);
     }
+    localStorage.removeItem(LS_PREFIX + 'nextId_' + store);
   }
-  showToast('已清空');
-  setTimeout(() => location.reload(), 1000);
+  // 老版评论备份若不删除，会在下次启动时把刚清空的记录重新恢复。
+  localStorage.removeItem('noteBackup');
+  if (preservedSyncUrl) await setSetting('syncUrl', preservedSyncUrl);
+  if (preservedSyncSecret) await setSetting('syncSecret', preservedSyncSecret);
+  if (preservedStartDate) await setSetting('startDate', preservedStartDate);
+
+  clearSyncRetryState();
+  localStorage.removeItem(SYNC_ERROR_KEY);
+  markCloudSyncDirty();
+  let result = { ok: false, reason: 'not-configured' };
+  if (preservedSyncUrl && preservedSyncSecret) {
+    result = await syncToCloud({ silent: false });
+  }
+  showToast(result.ok ? '✓ 本机与云端数据已清空' : '本机已清空；云端清空将在同步恢复后继续');
+  setTimeout(() => location.reload(), 1800);
 }
 
 // ============================================================
@@ -5226,6 +5807,7 @@ async function handleURLImport() {
       imported++;
     }
   }
+  scheduleCloudSync();
   
   clearHash();
   
@@ -5279,7 +5861,7 @@ async function ensureStartDate() {
   const existing = await getSetting('startDate');
   if (existing) return { firstTime: false, startDate: existing };
 
-  // 第一次启动: 把"本周一"持久化为 startDate(本周即计划第一周)
+  // 个人实例优先使用计划的固定历史锚点；通用模板没有该字段时才回退到本周一。
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dayOfWeek = today.getDay();
@@ -5287,9 +5869,12 @@ async function ensureStartDate() {
   const thisMonday = new Date(today);
   thisMonday.setDate(today.getDate() - daysToMonday);
   const thisMondayStr = fmtDate(thisMonday);
+  const configuredStartDate = /^\d{4}-\d{2}-\d{2}$/.test(PLAN_DATA.startDate || '')
+    ? PLAN_DATA.startDate
+    : thisMondayStr;
 
-  await setSetting('startDate', thisMondayStr);
-  return { firstTime: true, startDate: thisMondayStr };
+  await setSetting('startDate', configuredStartDate);
+  return { firstTime: true, startDate: configuredStartDate };
 }
 
 // ============================================================
@@ -5300,6 +5885,10 @@ async function ensureStartDate() {
   
   // 1. 从 IndexedDB 迁移到 localStorage(从 v8.2 及之前升级的兼容)
   const idbMigration = await migrateFromIDB();
+
+  // 1b. 必须先恢复旧 settings，再迁移同步地址；否则默认值会让整组
+  // IndexedDB settings 被误判为“已有 localStorage 数据”而跳过。
+  await ensureAwsSyncConfig();
   
   // 2. 从老版 noteBackup localStorage 迁移
   const oldBackupCount = await migrateFromOldNoteBackup();
@@ -5310,10 +5899,17 @@ async function ensureStartDate() {
   // 4. v8.6: 为所有缺 exerciseKey 的老评论自动回填(让评论跨周聚合)
   const backfilled = await backfillExerciseKey();
 
+  // 4b. v1.2.0: 保留原位置ID，并为可识别的历史完成日志补稳定动作ID
+  const workoutIdsBackfilled = await backfillWorkoutMovementIds();
+
   // 5. v1.0.2: 修复 V3 多训练组重复 exerciseId 导致的评论错绑
   const notesRepaired = await repairMislinkedExerciseNotes();
+
+  if (idbMigration.migrated > 0 || oldBackupCount > 0 || backfilled > 0 || workoutIdsBackfilled > 0 || notesRepaired > 0) {
+    markCloudSyncDirty();
+  }
   
-  if (idbMigration.migrated > 0 || oldBackupCount > 0 || backfilled > 0 || notesRepaired > 0) {
+  if (idbMigration.migrated > 0 || oldBackupCount > 0 || backfilled > 0 || workoutIdsBackfilled > 0 || notesRepaired > 0) {
     const parts = [];
     if (idbMigration.migrated > 0) {
       parts.push(`从 IndexedDB 迁移: ${idbMigration.summary.join(', ')}`);
@@ -5323,6 +5919,9 @@ async function ensureStartDate() {
     }
     if (backfilled > 0) {
       parts.push(`已为 ${backfilled} 条老评论自动关联动作 (跨周共享)`);
+    }
+    if (workoutIdsBackfilled > 0) {
+      parts.push(`已为 ${workoutIdsBackfilled} 条历史完成记录补充稳定动作索引`);
     }
     if (notesRepaired > 0) {
       parts.push(`已修复 ${notesRepaired} 条错绑到错误动作的评论`);
@@ -5338,7 +5937,7 @@ async function ensureStartDate() {
     setTimeout(() => {
       alert(
         `👋 欢迎使用!\n\n` +
-        `已自动将本周一 (${sd.startDate}) 设为 Week ${PLAN_FIRST_WEEK} 起点。\n\n` +
+        `已将训练开始日期 (${sd.startDate}) 设为 Week ${PLAN_FIRST_WEEK} 起点。\n\n` +
         `如需修改,请到【设置】→【训练开始日期】调整。`
       );
     }, 800);
@@ -5346,6 +5945,11 @@ async function ensureStartDate() {
   
   await renderToday();
   setTimeout(() => handleURLImport(), 300);
+  if (_syncDirty && !_syncBlocked && await getSetting('syncSecret')) {
+    const savedRetryAt = Number(localStorage.getItem(SYNC_NEXT_RETRY_AT_KEY) || 0);
+    const retryDelay = Math.max(500, savedRetryAt - Date.now());
+    _syncTimer = setTimeout(() => syncToCloud({ silent: true }), retryDelay);
+  }
 
   // ====== Service Worker 注册(PWA 离线支持) ======
   // 仅在 http(s) 下注册(file:// 协议不支持 SW,但 file:// 本身就是离线可用的)

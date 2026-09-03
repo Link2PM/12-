@@ -1,12 +1,14 @@
 # 体态修复训练手册 — 项目文档
 
+> **2026-09-03 状态提示**：V4 计划与 AWS 同步修复已形成 v1.2.0 本地发布候选，尚待 CTO 复核和生产部署。训练快照、迁移前同步状态及恢复基线详见 `STATUS_2026-08-30.md`；仓库中的 Supabase / 旧 Cloudflare 读取实现仅作历史参考。
+
 ## 项目概述
 
-个人体态矫正训练 PWA 应用。「应用壳 + 计划数据」两文件架构：`index.html`（~5360 行，HTML/CSS/JS 内联的应用壳）+ `plan.js`（~830 行，全部个人计划数据）。配合 `sw.js` 提供 PWA 离线缓存。
+个人训练 PWA 应用。「应用壳 + 计划数据」两文件架构：`index.html`（HTML/CSS/JS 内联的应用壳）+ `plan.js`（全部个人计划数据）。配合 `sw.js` 提供 PWA 离线缓存，`aws-sync/` 提供同源私有快照服务。
 
 **GitHub**: https://github.com/Link2PM/12-  
-**线上地址**: https://link2pm.github.io/12-/ （GitHub Pages，iOS Safari 打开后「添加到主屏幕」）  
-**当前版本**: v1.1.0  
+**线上地址**: https://health.gaindar.com/ （用户已确认；原 GitHub Pages 地址不再视为生产入口）<br>
+**当前发布候选**: v1.2.0（生产环境在本次上线前仍为 v1.1.0）
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式  
 **开源版**: 应用壳的通用化版本在 `healthy-app-template` 模板仓库（配套 `healthy-coach-skill` 生成个人计划），本仓库是个人实例 + 上游源头：应用壳改动先在这里验证，再同步到模板仓库
 
@@ -15,7 +17,7 @@
 1. **零依赖自包含**: 所有代码在 index.html + plan.js 两个本地文件中，零外部 CDN 依赖，`file://` 可直接打开
 2. **离线优先**: 数据存 localStorage（主） + IndexedDB（备份/媒体），Service Worker 做 PWA 离线缓存
 3. **计划与应用壳解耦**: 一切个人化内容（`PLAN_DATA`、`WEEKS`、`HABITS`、`METRICS`、`NOTE_TEMPLATES`、`VIDEO_MAP`、`EXERCISE_NAME_ALIASES`）都在 `plan.js`；index.html 是纯通用应用壳，从这些全局常量动态读取。改计划只改 plan.js；升级应用只换 index.html/sw.js，互不影响。计划可从任意周次开始（`PLAN_FIRST_WEEK = WEEKS[0].weekNum`），应用壳内不允许硬编码具体周次
-4. **数据安全**: 所有数据仅存本地浏览器，API Key 仅发送到对应 AI 厂商，不经过任何中间服务器
+4. **数据安全**: 本地浏览器仍是离线主存储，生产数据库据用户确认已迁到自有 AWS；定期保存脱敏 JSON 作为独立备份。PWA 原始导出可能包含 API Key/同步凭据，不得直接提交仓库
 5. **AI 分析以问题发现为导向**: System Prompt 强调客观真实，不鼓励式反馈。可要求用户拍视频验证、暂停动作、降重量
 
 ## 文件结构
@@ -25,14 +27,23 @@ index.html               — 应用壳（~5360行，HTML + CSS + JS 内联，无
 plan.js                  — 个人训练计划数据（WEEKS/PLAN_DATA/HABITS/METRICS 等，index.html 之前加载）
 sw.js                    — Service Worker（Network-first 离线缓存，含 plan.js）
 scripts/validate-plan.js — plan.js 结构校验器（node scripts/validate-plan.js）
+scripts/test-v4-integration.js — V4 日期、历史兼容、视频、版本与同步安全回归
+aws-sync/                — AWS/EC2 单用户快照服务、测试与 systemd/Caddy 部署材料
 CLAUDE.md                — 本文件
 12周训练计划_V3_*.md      — 训练计划原始文档（参考用）
+12周训练计划_V4_2026-09-03.md — 已确认并映射到 App Week 20–31 的新周期正式文档
+训练执行卡_V4_2026-09-03.md — 训练现场短版
+12周训练计划_W19-W30_V2_*.md — 已被 V4 取代的审阅稿
+12周训练计划_W19-W30_2026-08-31.md — 已被取代的第一版12周草案
+8周训练计划_W19-W26_*.md   — 已被取代的历史草案
 ai-report-*.md           — 历史 AI 分析报告导出
+STATUS_2026-08-30.md     — 最新项目、同步状态与训练进度快照
+healthy-mcp/data/*.json  — 本地训练数据备份（真实数据已由子目录 .gitignore 排除）
 ```
 
 ## 代码结构
 
-`plan.js`（数据按定义顺序）: `PLAN_DATA`（晨间/激活模板）→ `buildActivationWeek()` → `V3_*` 数据 + `buildV3Week()` → `WEEKS` → `HABITS` → `METRICS` → `NOTE_TEMPLATES` → `VIDEO_MAP` + `getVideoForExercise()` → `EXERCISE_NAME_ALIASES`。
+`plan.js`（数据按定义顺序）: `PLAN_DATA`（旧计划晨间/激活模板）→ 历史 Week 3–18 → `V4_PLAN_META` / `V4_MOVEMENT_IDS` / V4 builders → 过渡 Week 19 与正式 Week 20–31 → `WEEKS` → `HABITS` → `METRICS` → `NOTE_TEMPLATES` → `VIDEO_MAP` + `getVideoForExercise()` → `EXERCISE_NAME_ALIASES`。
 
 `index.html` 行号会随改动漂移，用 grep 定位；当前锚点：
 
@@ -59,8 +70,8 @@ ai-report-*.md           — 历史 AI 分析报告导出
 
 | Store | keyPath | 用途 |
 |-------|---------|------|
-| `workoutLogs` | `id`(自增) | 训练完成记录 `{id, date, exerciseId, completed, completedAt}` |
-| `exerciseNotes` | `id`(自增) | 动作评论/笔记 `{id, exerciseId, exerciseKey, text, createdAt}` |
+| `workoutLogs` | `id`(自增) | 训练完成记录 `{id, date, exerciseId, movementId?, completed, completedAt}` |
+| `exerciseNotes` | `id`(自增) | 动作评论/笔记 `{id, exerciseId, exerciseKey, movementId?, text, createdAt}` |
 | `dailyHabits` | `date` | 每日习惯打卡 `{date, habits: {}, counters: {}}` |
 | `bodyMetrics` | `id`(自增) | 体测数据 `{id, metricId, date, value}` |
 | `settings` | `key` | 设置项 `{key, value}` |
@@ -71,6 +82,16 @@ ai-report-*.md           — 历史 AI 分析报告导出
 与 localStorage 同构，额外包含：
 - `media` store：照片/视频 Blob，通过 `noteId` 关联到 exerciseNotes
 
+### 生产远端与本地备份（更新至 2026-09-03）
+
+- 生产数据库：用户确认已从 Supabase 迁移到自有 AWS；旧浏览器仍指向已停服的 Supabase Edge Function，是同步失败的直接原因。
+- v1.2.0 默认使用同源 `/api/sync`。`aws-sync/` 提供已通过本地端到端测试的 EC2 + SQLite 最小服务候选；只有 CTO 部署并完成生产 smoke 后，才能称生产同步恢复。
+- 前端以持久化 revision 标记待同步变更，启动/联网/回前台可补推；网络与 5xx 采用退避重试，永久 4xx 停止自动重试，版本冲突不得静默覆盖。
+- 同步 payload 仅允许 `startDate`、`aiProvider`、`aiModel` 三个安全设置；AI Key、同步密钥、同步 URL 和媒体数据不得上传。服务端还会二次过滤/拒绝敏感字段。
+- 浏览器导出快照仍带有旧 Supabase 同步设置，`lastSyncAt` 停在 2026-08-07；因此本地数据完整不等于 AWS 已同步。
+- 最新脱敏训练备份位于 `healthy-mcp/data/posture-recovery-2026-08-30.json`，数据截止 2026-08-28。
+- 旧 `supabase/` 与远程 MCP 读取代码保留作历史参考，不参与 v1.2.0 发布。
+
 ### ⚠️ iOS PWA 存储隔离（重要运维知识）
 
 iOS 上**每个主屏图标是独立的 PWA 实例，各有独立的 localStorage/IndexedDB 容器**。后果：
@@ -80,10 +101,15 @@ iOS 上**每个主屏图标是独立的 PWA 实例，各有独立的 localStorag
 
 ### 关键 Settings 键
 
-- `startDate`: 训练开始日期（Week 3 周一，实际值 `2026-06-08`），用于计算当前周次
+- `startDate`: 训练开始日期（Week 3 周一，实际值 `2026-05-11`），用于计算当前周次
 - `aiProvider`: AI 接入商 ID（`claude`/`gemini`/`qwen`/`deepseek`）
 - `aiApiKey`: AI API Key
 - `aiModel`: 自定义模型名（可选，留空用默认）
+- `syncUrl`: 同步入口；v1.2.0 默认 `/api/sync`，升级时会自动替换旧 Supabase URL
+- `syncSecret`: 本机 Bearer 密钥，绝不进入同步 payload
+- `lastSyncAt` / `lastSyncReceipt`: 最近一次经服务端确认成功的时间与安全回执
+
+同步的 revision、ETag、错误与退避状态放在专用 localStorage 键中，不属于训练快照。
 
 ## AI 分析功能
 
@@ -141,26 +167,30 @@ WEEKS = [
 ]
 ```
 
-**4 个阶段**:
+历史计划共 4 个阶段：
 - Phase 0 (Week 3-6): 基础激活期
 - Phase 1 (Week 7-10): 对称巩固期
 - Phase 2 (Week 11-14): 渐进期
 - Phase 3 (Week 15-18): 目标期
 
+V4 使用 App Week 19 作为不补课的过渡/校准周，正式 12 周为 App Week 20–31（2026-09-07 至 2026-11-29）。标准周为周一、周二、周四、周五力量，周三 Zone 2 与步态观察；每天只把正式主训练计入 18 个周完成槽位，热身、Zone 2 与条件动作通过 `countsTowardProgress:false` 排除。
+
+`exercise.id` 仍是每周/每天的位置 ID，旧 Week 3–18 不得修改。V4 新增稳定的 `movementId`；跨周历史聚合同时依赖保留的 canonical 动作名与 `EXERCISE_NAME_ALIASES`。同一动作不得随意改名，变式或展示文案变化要先写兼容映射。
+
 **修改训练计划**: 只需修改 `plan.js` 中的 `WEEKS` 数组和 `PLAN_DATA`，其他所有功能（今日视图、AI 分析、进度统计）会自动适配。改完必须跑 `node scripts/validate-plan.js` 校验（动作 id 全计划唯一、每周 7 天、weekNum 连续等硬约束都在校验器里）。
 
 ## 习惯打卡
 
-8 个勾选项 + 2 个计数项，定义在 `HABITS` 常量中。
+6 个勾选项 + 1 个计数项，定义在 `HABITS` 常量中。
 
 **双入口**: 今日视图底部（内嵌）+ 独立"微习惯"Tab
 **自动联动**: 晨间重置动作全部完成时，自动勾选 `h-morning` 习惯
 
 ## 开发注意事项
 
-1. **修改后验证**: 提取 index.html 的 `<script>` 内容做 `node --check` 语法检查；改了 plan.js 则跑 `node scripts/validate-plan.js`
-2. **版本号**: 采用语义化三段式 `major.minor.patch`（如 `v1.0.1`）——第 1 位仅在超级大升级时 +1，第 2 位常规功能升级，第 3 位 bug 修复。需同时更新三处：设置页底部文本、`assembleSyncPayload()` 与 `exportJSON()` 中的 `appVersion`
+1. **修改后验证**: 至少运行 `node scripts/validate-plan.js`、`node scripts/test-v4-integration.js`、`node --check plan.js`、`node --check sw.js`、index 内联脚本解析检查，以及 `python3 -m unittest discover -s aws-sync -p 'test_*.py' -v`
+2. **版本号**: 采用语义化三段式 `major.minor.patch`。版本集中在 `APP_VERSION`，同时检查设置页、同步 payload、JSON 导出、`plan.js?v=...` 和 Service Worker cache；本轮为 v1.2.0 / `healthy-v6`
 3. **新增 Store**: 需改 4 处：`LS_STORES` 数组、`DB_VERSION` + `onupgradeneeded`、`_lsPut/_lsGet/_lsDelete` 的 keyField 条件、`clearAllData` 的 stores 列表
 4. **导出兼容**: 新增数据表时，需同步更新 `exportJSON()`、`importData()`、`previewImport()`、`debugStorageStatus()`
-5. **推送**: `git push origin main`，用户通过 GitHub Pages 或本地文件访问
+5. **推送/部署**: `git push origin main` 不等于生产发布。实现任务先冻结精确文件与哈希，再交给 CTO 任务完成 exact-tree 复核、服务端与静态资源部署、Cloudflare 清缓存和生产 smoke；GitHub Billing 可以登记为跳过，但不能写成 CI PASS
 6. **CSS 变量**: `--bg-0`~`--bg-3`(背景), `--text-0`~`--text-3`(文字), `--accent`(金色), `--good`(绿), `--warn`(橙), `--bad`(红)

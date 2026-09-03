@@ -10,6 +10,8 @@
 // 训练计划数据
 // ============================================================
 const PLAN_DATA = {
+  // 个人实例的历史锚点；新设备首次打开时也必须沿用，避免当前日期被误算为 Week 3。
+  startDate: '2026-05-11',
   warmupTemplate: {
     name: '训练前激活套餐',
     duration: '15 分钟',
@@ -601,6 +603,302 @@ function buildV3Week(weekNum) {
   };
 }
 
+// ============================================================
+// V4 训练计划数据（2026-09-07 起，App Week 20-31）
+// ============================================================
+// id 继续表示“某周某日的位置”，用于兼容既有完成日志；movementId 是从
+// v1.2.0 开始新增的稳定动作 ID，同一动作跨周保持不变。
+const V4_PLAN_META = Object.freeze({
+  version: '4.0',
+  appStartWeek: 20,
+  appEndWeek: 31,
+  startDate: '2026-09-07',
+  endDate: '2026-11-29',
+  targetBodyFat: '15%（同设备执行带 14.5%–15.5%）'
+});
+
+const V4_MOVEMENT_IDS = Object.freeze({
+  lowCardioWarmup: 'warmup-low-cardio',
+  wallSlide: 'wall-slide',
+  bandExternalRotation: 'band-external-rotation',
+  footAssistedPullup: 'foot-assisted-pullup',
+  pullup: 'pull-up',
+  barbellBenchPress: 'barbell-bench-press',
+  seatedCableRow: 'seated-cable-row',
+  dumbbellLateralRaise: 'dumbbell-lateral-raise',
+  footTripod: 'foot-tripod',
+  supportedBodyweightSplitSquat: 'supported-bodyweight-split-squat',
+  barbellBackSquat: 'barbell-back-squat',
+  bulgarianSplitSquat: 'bulgarian-split-squat',
+  seatedLegCurl: 'seated-leg-curl',
+  standingCalfRaise: 'standing-calf-raise',
+  naturalGaitObservation: 'natural-gait-observation',
+  zone2Cardio: 'zone-2-cardio',
+  deadBug: 'dead-bug',
+  singleLegStance: 'single-leg-stance',
+  wallTouchHipHinge: 'wall-touch-hip-hinge',
+  romanianDeadlift: 'romanian-deadlift',
+  barbellHipThrust: 'barbell-hip-thrust',
+  farmerCarry: 'farmer-carry'
+});
+
+function v4Exercise(name, movementId, sets, weight, tip, extra = {}) {
+  return { name, movementId, sets, weight: weight || '', tip: tip || '', ...extra };
+}
+
+function v4Warmup(name, movementId, sets, tip) {
+  return v4Exercise(name, movementId, sets, '', tip, { countsTowardProgress: false });
+}
+
+function v4Sets(cycleWeek, values) {
+  if (cycleWeek === 1) return values.calibration;
+  if (cycleWeek === 4 || cycleWeek === 8) return values.deload;
+  if (cycleWeek === 12) return values.test;
+  if (cycleWeek <= 3) return values.base;
+  if (cycleWeek <= 7) return values.build;
+  return values.consolidate;
+}
+
+function v4Stage(cycleWeek) {
+  if (cycleWeek === 1) return '校准周';
+  if (cycleWeek <= 3) return '基础周';
+  if (cycleWeek === 4) return '减量与复测';
+  if (cycleWeek <= 7) return '均衡增肌与稳定减脂';
+  if (cycleWeek === 8) return '减量与复测';
+  if (cycleWeek <= 11) return '巩固期';
+  return '减量与分日验收';
+}
+
+function buildV4Day(appWeek, cycleWeek, dayIndex, dayName, title, groups) {
+  let counter = 0;
+  return {
+    dayName,
+    dayType: 'training',
+    title: `V4 Week ${cycleWeek} ${dayName} · ${title}`,
+    skipWarmup: true,
+    skipMorning: true,
+    progressMode: 'main-only',
+    groups: groups.map(group => ({
+      ...group,
+      exercises: group.exercises.map(ex => ({
+        ...ex,
+        id: `w${appWeek}-d${dayIndex}-${++counter}`
+      }))
+    }))
+  };
+}
+
+function buildV4Week(appWeek, cycleWeek) {
+  const stage = v4Stage(cycleWeek);
+  const isCalibration = cycleWeek === 1;
+  const isDeload = cycleWeek === 4 || cycleWeek === 8;
+  const isTest = cycleWeek === 12;
+  const weekNote = isCalibration
+    ? '校准周：所有复合动作留 3–4 次余力；建立卧推 B0、步态、深蹲、RDL 与左右肩腰基线；有氧 90–120 分钟。'
+    : isDeload
+      ? '减量复测周：重量保持或下降 5%–10%，至少留 4 次；不测试极限；有氧 140–145 分钟。'
+      : isTest
+        ? '分日验收周：只使用 Week 9–11 已验证的绿灯重量，不做 1RM，不在同一天测试多个极限项目。'
+        : `${stage}：按“双进阶＋技术/疼痛门槛”执行；热身不计工作组，有氧 Week 2 为 120 分钟、Week 3 起以 150 分钟为标准。`;
+
+  const upperWarmup = [
+    v4Warmup('低强度有氧热身', V4_MOVEMENT_IDS.lowCardioWarmup, '1×2分钟', '自行车或快走，只提高体温'),
+    v4Warmup('墙滑', V4_MOVEMENT_IDS.wallSlide, '1×8', '先检查左右肩；动作本身疼痛则删除'),
+    v4Warmup('弹力带肩外旋', V4_MOVEMENT_IDS.bandExternalRotation, '1×10/侧', '肘下垫毛巾，低疲劳，不做到酸胀'),
+    v4Warmup('脚辅助引体', V4_MOVEMENT_IDS.footAssistedPullup, '1×5', '脚只给最低必要辅助，随后进入引体工作组')
+  ];
+
+  const pullupMonSets = v4Sets(cycleWeek, {
+    calibration: '3×2', base: '4×3', build: '3×3–5', consolidate: '3×3–5',
+    deload: '3×2–3', test: '1×最大标准次数 + 2×远离力竭'
+  });
+  const benchMonSets = v4Sets(cycleWeek, {
+    calibration: '2–3×8 校准', base: '3×8–10', build: '4×8–10', consolidate: '4×8–10',
+    deload: '2×8', test: '2×8 减量'
+  });
+  const rowMonSets = v4Sets(cycleWeek, {
+    calibration: '3×8–12', base: '3×8–12', build: '3×8–12', consolidate: '3×8–12',
+    deload: '2×8–12', test: '2×8–12'
+  });
+  const lateralMonSets = v4Sets(cycleWeek, {
+    calibration: '2×12–15', base: '2×12–15', build: '3×12–20', consolidate: '3×12–20',
+    deload: '1×12–15', test: '1×12–15'
+  });
+
+  const monday = buildV4Day(appWeek, cycleWeek, 1, '周一', '上肢A · 水平推容量与引体力量', [
+    { title: '热身（6–8分钟）', description: '先检查左肩下方、右肩与肘部；出现黄灯即停止对应动作。卧推递增组紧邻卧推完成。', exercises: upperWarmup },
+    { title: '主训练', exercises: [
+      v4Exercise('引体向上', V4_MOVEMENT_IDS.pullup, pullupMonSets, '自重；不足部分用辅助', '每组至少留2次；严格次数与辅助次数分开记录'),
+      v4Exercise('杠铃卧推', V4_MOVEMENT_IDS.barbellBenchPress, benchMonSets,
+        isCalibration ? '片0/总20kg起；当天建立B0' : '使用已验证B0；记录片重/总重',
+        isCalibration ? '必须有安全杆或保护员；校准组后不追加正式组；训练后及次晨肩部回到基线' : '与周四同一握距、凳位和器材；肩部全绿才进阶'),
+      v4Exercise('坐姿绳索划船', V4_MOVEMENT_IDS.seatedCableRow, rowMonSets, '同机同握把；已验证工作重量', '顶峰可控，不用腰部后仰；只有确认旧机器设置相同时才沿用旧数值'),
+      v4Exercise('哑铃侧平举', V4_MOVEMENT_IDS.dumbbellLateralRaise, lateralMonSets, '2.5–5kg/手起', '耸肩或左肩不适出现前结束')
+    ]}
+  ]);
+
+  const squatSets = v4Sets(cycleWeek, {
+    calibration: '3×6', base: '3×6–8', build: '4×5–8', consolidate: '4×5–8',
+    deload: '2×6', test: '1×技术确认 + 1×轻回退'
+  });
+  const splitTueSets = v4Sets(cycleWeek, {
+    calibration: '2×8/侧', base: '3×8/侧', build: '3×8–10/侧', consolidate: '3×8–10/侧',
+    deload: '2×8/侧', test: '2×8/侧'
+  });
+  const legCurlSets = v4Sets(cycleWeek, {
+    calibration: '2×10–15', base: '3×10–15', build: '3×10–15', consolidate: '3×10–15',
+    deload: '2×10–12', test: '2×10–12'
+  });
+  const calfTueSets = v4Sets(cycleWeek, {
+    calibration: '2×10–15', base: '3×10–15', build: '3×10–15', consolidate: '3×10–15',
+    deload: '2×10–12', test: '1×10–15'
+  });
+
+  const tuesday = buildV4Day(appWeek, cycleWeek, 2, '周二', '下肢A · 深蹲与单腿承重', [
+    { title: '热身（8–10分钟）', description: '使用自然脚尖角度；深蹲另做空杆×8、约工作重量60%×5、80%×3，热身组不计工作量。', exercises: [
+      v4Warmup('低强度有氧热身', V4_MOVEMENT_IDS.lowCardioWarmup, '1×2–3分钟', '自行车或自然走路'),
+      v4Warmup('足底三点支撑', V4_MOVEMENT_IDS.footTripod, '1×20–30秒/侧', '大脚趾根、小脚趾根、脚跟同时接地，不蜷脚趾'),
+      v4Warmup('扶支撑自重分腿蹲', V4_MOVEMENT_IDS.supportedBodyweightSplitSquat, '1×5/侧', '观察足底、膝轨迹与骨盆，不强行把膝盖掰直')
+    ]},
+    { title: '主训练', exercises: [
+      v4Exercise('杠铃深蹲', V4_MOVEMENT_IDS.barbellBackSquat, squatSets,
+        isCalibration ? '片40/总60kg起；不轻松则退到片30–35/总50–55kg' : '最近全绿重量；目标总75kg×6技术正常',
+        '记录片重/总重；足底、自然膝轨迹、髋肩同步、深度一致、全程无痛五项全绿才进阶'),
+      v4Exercise('保加利亚分腿蹲', V4_MOVEMENT_IDS.bulgarianSplitSquat, splitTueSets, '5kg/手起', '轻扶支撑；当日弱侧先做，强侧只匹配标准次数；负重写清每手'),
+      v4Exercise('坐姿腿弯举', V4_MOVEMENT_IDS.seatedLegCurl, legCurlSets, '同机轻档重新校准', 'Week 1找到12次后仍留3–4次的档位；固定座椅与滚垫位置'),
+      v4Exercise('站姿提踵', V4_MOVEMENT_IDS.standingCalfRaise, calfTueSets, '扶支撑自重起', '足底不打滑；顶部停1秒、底部可控；3×15轻松后再加负重')
+    ]}
+  ]);
+
+  const wednesday = buildV4Day(appWeek, cycleWeek, 3, '周三', '步态、Zone 2 与核心', [
+    { title: '步态热身与观察（8–10分钟）', description: '自然速度，不强制脚尖朝前。基线/复测录像为正、背、左右侧各2次10米；一次只用一个外部提示。', exercises: [
+      v4Exercise('自然步行观察', V4_MOVEMENT_IDS.naturalGaitObservation, '1×8–10分钟', '', '先自然走3分钟，再观察10米：左右画弧、拖脚、骨盆上提、躯干侧摆、步幅、疼痛；Week 1/4/8/12录像')
+    ]},
+    { title: '主训练', exercises: [
+      v4Exercise('Zone 2 有氧', V4_MOVEMENT_IDS.zone2Cardio, isDeload || isTest ? '35–40分钟' : '45分钟', 'RPE 3–4/10', '可说完整句子但呼吸明显加快；步态黄灯则换自行车或椭圆机', { countsTowardProgress: false }),
+      v4Exercise('死虫', V4_MOVEMENT_IDS.deadBug, isDeload || isTest ? '1×6–10/侧' : '2×6–10/侧', '自重', '至少留3次；腰部保持可控，动作后无腰痛')
+    ]},
+    { title: '降速', exercises: [
+      v4Warmup('低强度有氧热身', V4_MOVEMENT_IDS.lowCardioWarmup, '1×3分钟', '逐步降速，恢复自然呼吸')
+    ]}
+  ]);
+
+  const benchThuSets = v4Sets(cycleWeek, {
+    calibration: '3×8 验证', base: '3×8', build: '4×6–8', consolidate: '4×6–8',
+    deload: '2×8', test: '1×6–8表现组 + 1–2×轻回退'
+  });
+  const pullupThuSets = v4Sets(cycleWeek, {
+    calibration: '3×2', base: '3×2–3', build: '3×2–4', consolidate: '3×2–4',
+    deload: '2×2–3', test: '2×远离力竭'
+  });
+  const rowThuSets = v4Sets(cycleWeek, {
+    calibration: '3×8–12', base: '3×8–12', build: '3×8–12', consolidate: '3×8–12',
+    deload: '2×8–12', test: '2×8–12'
+  });
+  const lateralThuSets = v4Sets(cycleWeek, {
+    calibration: '2×12–20', base: '2×12–20', build: '2×12–20', consolidate: '2×12–20',
+    deload: '1×12–15', test: '1×12–15'
+  });
+
+  const thursday = buildV4Day(appWeek, cycleWeek, 4, '周四', '上肢B · 引体容量与水平推力量', [
+    { title: '热身（6–8分钟）', description: '先检查左右肩；卧推递增组紧邻卧推，脚辅助引体紧邻引体。', exercises: upperWarmup },
+    { title: '主训练', exercises: [
+      v4Exercise('杠铃卧推', V4_MOVEMENT_IDS.barbellBenchPress, benchThuSets,
+        isCalibration ? '周一候选B0或低2.5–5kg；记录片重/总重' : '与周一相同的已验证重量',
+        isCalibration ? '候选B0完成3×8验证，不加重；肩部训练后和次晨均回到基线' : '与周一同一握距、凳位和器材；周一/周四分别满足双进阶门槛'),
+      v4Exercise('引体向上', V4_MOVEMENT_IDS.pullup, pullupThuSets, '自重；不足部分用辅助', '每组至少留2次；每个完整标准周只增加1–2个严格总次数'),
+      v4Exercise('坐姿绳索划船', V4_MOVEMENT_IDS.seatedCableRow, rowThuSets, '与周一同机同设置', '顶峰可控，不用腰部后仰'),
+      v4Exercise('哑铃侧平举', V4_MOVEMENT_IDS.dumbbellLateralRaise, lateralThuSets, '2.5–5kg/手起', '与周一同动作；不追加反向飞鸟，耸肩前结束')
+    ]}
+  ]);
+
+  const rdlSets = v4Sets(cycleWeek, {
+    calibration: '3×6', base: '3×6–8', build: '3×6–8', consolidate: '3×6–8',
+    deload: '2×6', test: '1×技术确认 + 最多1×轻回退'
+  });
+  const hipThrustSets = v4Sets(cycleWeek, {
+    calibration: '2×8–10', base: '3×8–10', build: '3×8–10', consolidate: '3×8–10',
+    deload: '2×8', test: '2×8–10'
+  });
+  const splitFriSets = v4Sets(cycleWeek, {
+    calibration: '1×8/侧', base: '2×8/侧', build: '2×8–10/侧', consolidate: '2×8–10/侧',
+    deload: '1×8/侧', test: '1×8/侧'
+  });
+  const calfFriSets = v4Sets(cycleWeek, {
+    calibration: '2×10–15', base: '2×10–15', build: '2×10–15', consolidate: '2×10–15',
+    deload: '1×10–12', test: '1×10–15'
+  });
+
+  const friday = buildV4Day(appWeek, cycleWeek, 5, '周五', '下肢B · 髋铰链与臀部', [
+    { title: '热身（8–10分钟）', description: 'RDL另做空杆×8、约工作重量60%×5；负重提高后加80%×3。臀推在轮到时做1个轻热身组。', exercises: [
+      v4Warmup('低强度有氧热身', V4_MOVEMENT_IDS.lowCardioWarmup, '1×2–3分钟', '自行车或自然走路'),
+      v4Warmup('单腿站立', V4_MOVEMENT_IDS.singleLegStance, '1×20秒/侧', '扶支撑、睁眼；观察骨盆和足底，不追求极限'),
+      v4Warmup('墙触髋铰链', V4_MOVEMENT_IDS.wallTouchHipHinge, '1×8', '臀部向后触墙，不用腰部弯曲代替')
+    ]},
+    { title: '主训练', exercises: [
+      v4Exercise('罗马尼亚硬拉', V4_MOVEMENT_IDS.romanianDeadlift, rdlSets,
+        isCalibration ? '杠铃片40/总60kg起；不轻松则退到片30–35/总50–55kg' : '最近全绿重量；目标总75kg×6全绿',
+        '杠贴腿；最低点由腘绳拉伸决定；取杠、下放、起身、回架和次晨全绿才进阶；握力先失效时后续组可用助力带'),
+      v4Exercise('杠铃臀推', V4_MOVEMENT_IDS.barbellHipThrust, hipThrustSets,
+        isCalibration ? '片55–60/总75–80kg起' : '最近全绿重量；目标片70/总90kg×10×3',
+        '顶部停1秒，不用腰部过伸；记录片重/总重'),
+      v4Exercise('保加利亚分腿蹲', V4_MOVEMENT_IDS.bulgarianSplitSquat, splitFriSets, '周二同重或低一个最小增量', '轻扶支撑；技术量，保留3次，不触发加重'),
+      v4Exercise('站姿提踵', V4_MOVEMENT_IDS.standingCalfRaise, calfFriSets, '与周二同版本', '足底不打滑；顶部停1秒、底部可控'),
+      v4Exercise('农夫走', V4_MOVEMENT_IDS.farmerCarry, isCalibration || isDeload || isTest ? '0组（本周省略）' : '0–2×30–40米', '20–22.5kg/手', '条件项：必做项后仍在第55分钟内且肩腰全绿才做；否则省略，不算漏练', { countsTowardProgress: false })
+    ]}
+  ]);
+
+  const recoveryDay = (dayName, title, description) => ({
+    dayName, dayType: 'recovery', title: `V4 Week ${cycleWeek} ${dayName} · ${title}`,
+    description, skipMorning: true, progressMode: 'main-only'
+  });
+  const restDay = {
+    dayName: '周日', dayType: 'rest', title: `V4 Week ${cycleWeek} 周日 · 完全休息与周复盘`,
+    description: '不补课。用10分钟复盘必做动作完成率、有氧分钟、全绿训练次数和一个真实进步。',
+    skipMorning: true, progressMode: 'main-only'
+  };
+
+  return {
+    weekNum: appWeek,
+    cycleWeek,
+    planVersion: V4_PLAN_META.version,
+    phase: `V4 · ${stage}（周期 Week ${cycleWeek}/12）`,
+    note: weekNote,
+    days: [
+      monday,
+      tuesday,
+      wednesday,
+      thursday,
+      friday,
+      recoveryDay('周六', '自由活动', '可选社交运动或轻松散步；不承担完成责任，不补本周漏课。'),
+      restDay
+    ]
+  };
+}
+
+const V4_TRANSITION_WEEK = {
+  weekNum: 19,
+  cycleWeek: 0,
+  planVersion: V4_PLAN_META.version,
+  phase: 'V4 · Week 0 基线过渡',
+  note: '2026-08-31 至 09-06：不补旧课、不测极限。只建立同条件体测、腰围、照片、步态与肩腰症状基线；正式训练从 09-07 开始。',
+  days: ['周一', '周二', '周三', '周四', '周五', '周六'].map(dayName => ({
+    dayName,
+    dayType: 'recovery',
+    title: `V4 Week 0 ${dayName} · 基线与主动恢复`,
+    description: '自然活动即可。任选一天完成体重/体脂/腰围/照片，任选一天完成四机位10米自然步行录像；不刻意纠正脚位。',
+    skipMorning: true,
+    progressMode: 'main-only'
+  })).concat([{
+    dayName: '周日',
+    dayType: 'rest',
+    title: 'V4 Week 0 周日 · 准备正式周期',
+    description: '确认下周四个力量训练窗口和卧推安全杆/保护员条件；不补课。',
+    skipMorning: true,
+    progressMode: 'main-only'
+  }])
+};
+
 const WEEKS = [
   {
     weekNum: 3,
@@ -666,7 +964,11 @@ const WEEKS = [
   // ========== V3 计划: Phase 1-3 (Week 7-18) ==========
   buildV3Week(7), buildV3Week(8), buildV3Week(9), buildV3Week(10),
   buildV3Week(11), buildV3Week(12), buildV3Week(13), buildV3Week(14),
-  buildV3Week(15), buildV3Week(16), buildV3Week(17), buildV3Week(18)
+  buildV3Week(15), buildV3Week(16), buildV3Week(17), buildV3Week(18),
+
+  // ========== V4 计划: Week 0 + 正式 12 周 (App Week 19-31) ==========
+  V4_TRANSITION_WEEK,
+  ...Array.from({ length: 12 }, (_, i) => buildV4Week(20 + i, i + 1))
 ];
 
 const HABITS = {
@@ -687,6 +989,11 @@ const METRICS = [
   { id: 'm-weight', name: '体重', unit: 'kg', tip: '晨起空腹便后' },
   { id: 'm-bodyfat', name: '体脂率', unit: '%', tip: '体脂秤数据' },
   { id: 'm-muscle', name: '肌肉量', unit: 'kg', tip: '体脂秤数据' },
+  { id: 'm-waist', name: '肚脐腰围', unit: 'cm', tip: '晨起自然呼气末，肚脐水平测 2–3 次取中位' },
+  { id: 'm-chest', name: '胸围', unit: 'cm', tip: '同一呼吸状态与位置；Week 1/4/8/12 记录' },
+  { id: 'm-upperarm', name: '上臂围', unit: 'cm', tip: '同一侧、同一松紧状态；Week 1/4/8/12 记录' },
+  { id: 'm-thigh', name: '大腿围', unit: 'cm', tip: '同一侧、同一位置；Week 1/4/8/12 记录' },
+  { id: 'm-pullup-strict', name: '严格引体最大次数', unit: '次', tip: '动作标准一致；非测试周不测力竭' },
   { id: 'm-deadhang', name: '死悬时间', unit: '秒', tip: '双手抓单杠至力竭' },
   { id: 'm-singleleg-l', name: '单腿闭眼站立(左)', unit: '秒', tip: '晃 > 10° 停止' },
   { id: 'm-singleleg-r', name: '单腿闭眼站立(右)', unit: '秒', tip: '晃 > 10° 停止' },
@@ -733,6 +1040,7 @@ const VIDEO_MAP = {
   '死悬': { q: 'dead hang 死悬 引体准备' },
   '高位下拉(反握)': { q: '反握高位下拉 教学' },
   '高位下拉(窄正握)': { q: '高位下拉 窄握 教学' },
+  '引体向上': { q: '严格引体向上 标准动作 肩胛 教学' },
   '坐姿绳索划船': { q: '坐姿划船 窄握 肩胛' },
   '坐姿划船': { q: '坐姿划船 窄握 肩胛' },
   '单臂哑铃划船': { q: '单臂哑铃划船 教学' },
@@ -746,19 +1054,31 @@ const VIDEO_MAP = {
   '罗马尼亚硬拉(RDL)': { q: '罗马尼亚硬拉 RDL 教学 髋铰链' },
   '罗马尼亚硬拉': { q: '罗马尼亚硬拉 RDL 教学 髋铰链' },
   '高脚杯深蹲': { q: '高脚杯深蹲 goblet squat 教学' },
+  '杠铃深蹲': { q: '杠铃后蹲 标准动作 髋肩同步' },
   '保加利亚分腿蹲': { q: '保加利亚分腿蹲 教学 膝盖' },
   '单腿 RDL': { q: '单腿罗马尼亚硬拉 single leg RDL' },
   '髋外展器械': { q: '髋外展器械 臀中肌' },
   '提踵 + 胫骨前肌': { q: '提踵 胫骨前肌 小腿训练' },
   '单腿 RDL(辅助)': { q: '单腿 RDL 辅助 平衡' },
+  '低强度有氧热身': { q: '健身训练前 自行车 快走 热身' },
+  '足底三点支撑': { q: '足底三点支撑 足弓 教学' },
+  '扶支撑自重分腿蹲': { q: '扶支撑 分腿蹲 标准动作' },
+  '坐姿腿弯举': { q: '坐姿腿弯举 腘绳肌 教学' },
+  '站姿提踵': { q: '站姿提踵 标准动作 全程幅度' },
+  '自然步行观察': { q: '步态观察 正面 侧面 走路评估' },
+  '墙触髋铰链': { q: '墙触髋铰链 hip hinge 教学' },
   
   // 上肢推
   '俯卧撑': { q: '俯卧撑 标准动作 肩胛' },
   '俯卧撑加强版': { q: 'push up plus 俯卧撑加强版 前锯肌' },
   '哑铃卧推': { q: '哑铃卧推 教学 双手独立' },
+  '杠铃卧推': { q: '杠铃卧推 标准动作 肩胛 安全杆' },
+  '器械推胸（平推）': { q: '器械平推胸 标准动作 肩胛' },
+  '中立握哑铃地板卧推': { q: '中立握 哑铃地板卧推 教学' },
   '哑铃推肩': { q: '坐姿哑铃推肩 教学 肩胛' },
   '哑铃推肩(坐姿靠背)': { q: '坐姿哑铃推肩 靠背 教学' },
   '器械上斜推胸': { q: '器械上斜推胸 教学' },
+  '哑铃侧平举': { q: '哑铃侧平举 标准动作 避免耸肩' },
   '绳索下压': { q: '绳索下压 三头肌' },
   
   // 整合 + 核心
@@ -769,6 +1089,10 @@ const VIDEO_MAP = {
   '悬垂举腿(腿可弯)': { q: '悬垂举腿 hanging leg raise' },
   '绳索劈柴': { q: '绳索劈柴 wood chopper 抗旋转' },
   'Pallof Press': { q: 'pallof press 抗旋转 教学' },
+  '墙滑': { q: '墙滑 wall slide 肩胛 上旋 教学' },
+  '脚辅助引体': { q: '脚辅助引体向上 教学' },
+  '杠铃臀推': { q: '杠铃臀推 hip thrust 标准动作' },
+  '农夫走': { q: '农夫走 farmer carry 标准动作' },
   '反向卷腹': { q: '反向卷腹 reverse crunch' },
   '侧平板': { q: 'side plank 侧平板 教学' },
   '死虫加重': { q: '死虫加重 dead bug 进阶' },
@@ -808,16 +1132,15 @@ const EXERCISE_NAME_ALIASES = [
   ['坐姿绳索划船（助力带）', '坐姿绳索划船', '坐姿划船', '坐姿绳索划船(窄握)'],
   ['单臂哑铃划船（助力带）', '单臂哑铃划船'],
   ['哑铃俯身划船（助力带）', '哑铃俯身划船'],
-  ['死虫（Dead Bug）', '死虫', '死虫慢速版'],
-  ['死虫（进阶：伸腿）', '死虫加重', '健腹轮/死虫进阶'],
+  ['死虫（Dead Bug）', '死虫', '死虫慢速版', '死虫（进阶：伸腿）', '死虫加重'],
   ['死悬（握力专项）', '死悬（可加重）', '死悬', '死悬 + 肩胛激活', '死悬 + 激活'],
   ['罗马尼亚硬拉（助力带）', '罗马尼亚硬拉', '罗马尼亚硬拉(RDL)'],
   ['单腿RDL', '单腿 RDL', '单腿 RDL + 哑铃', '单腿 RDL(辅助)'],
-  ['辅助引体（离心）', '弹力带辅助引体', '弹力带辅助引体(慢离心)', '离心引体', '离心延时引体'],
+  ['辅助引体（离心）', '辅助引体', '弹力带辅助引体', '弹力带辅助引体(慢离心)', '离心引体', '离心延时引体'],
   ['引体向上', '完整引体向上', '多握法引体', 'EMOM 引体向上'],
   ['哑铃肩推', '哑铃肩推（W13评估后）', '哑铃推肩', '哑铃推肩(坐姿)', '哑铃推肩(坐姿靠背)', '推举(站姿)'],
   ['弹力带面拉', '面拉'],
-  ['杠铃深蹲', '杠铃后蹲', '杠铃前蹲'],
+  ['杠铃深蹲', '杠铃后蹲'],
   ['Pallof Press 抗旋转', 'Pallof Press'],
   ['悬垂举腿/仰卧举腿', '悬垂举腿', '悬垂举腿(腿可弯)'],
   ['卷腹/反向卷腹', '反向卷腹'],
@@ -825,6 +1148,5 @@ const EXERCISE_NAME_ALIASES = [
   ['弹力带侧向走', '弹力带侧步'],
   ['侧平板支撑', '侧平板'],
   ['窄距俯卧撑', '俯卧撑加强版', '俯卧撑加强版(Push-up Plus)'],
-  ['农夫走', '单侧哑铃行走', '哑铃行走'],
-  ['器械推胸（平推）', '器械上斜推胸'],
+  ['农夫走', '哑铃行走'],
 ];
