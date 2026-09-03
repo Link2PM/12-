@@ -1,0 +1,31 @@
+# Recommended same-origin layout. Merge this site block with the active Caddy
+# configuration; do not create a second health.gaindar.com block.
+health.gaindar.com {
+	encode zstd gzip
+
+	# route preserves the written order. Without it, Caddy can sort the broad
+	# /api/* path matcher ahead of the named exact matcher and shadow the API.
+	route {
+		@healthy_sync path /api/sync /api/sync/ /api/snapshot /api/snapshot/ /api/health /api/health/
+		handle @healthy_sync {
+			reverse_proxy 127.0.0.1:8787
+		}
+
+		# Never let an unknown /api path fall through to the PWA shell.
+		@unknown_api path /api /api/*
+		handle @unknown_api {
+			respond 404
+		}
+
+		handle {
+			root * /srv/healthy
+
+			# These files control upgrades and must be revalidated after every release.
+			@mutable path / /index.html /plan.js /sw.js
+			header @mutable Cache-Control "no-cache, must-revalidate"
+
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}
