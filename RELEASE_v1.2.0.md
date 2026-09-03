@@ -1,6 +1,6 @@
 # Healthy v1.2.0 发布交接单
 
-> 状态：本地发布候选已冻结并通过实现侧门禁；生产尚未发布。CTO 必须先做 exact-tree 复核与 staging，再执行生产部署和验收。
+> 状态：`v1.2.0` 后端与静态资源已于 2026-09-03 完成 Production 发布；用户正式训练快照尚未上传，需在持有最新数据的 iPhone PWA 中完成一次同步密钥配置后立即同步。详见 §6。
 
 ## 1. 发布范围
 
@@ -82,3 +82,46 @@ CTO 只能精确暂存下列文件，禁止 `git add -A`：
 | `CLAUDE.md` | `53d46c8d28a41121d13aef945d502a237e28bde6b68085336a71196f72eeecc7` |
 
 若前端出现问题，恢复上述精确静态资源并再次清 CDN 缓存。同步服务与数据库不得直接删除；先停止新写入、保留数据库和日志，再按部署前备份恢复。任何回滚后都要重新验证旧训练数据仍可读取。
+
+## 6. CTO Production 回执（2026-09-03）
+
+### 6.1 Exact 合入
+
+- 冻结候选：`c03ad98b58438cafbf78b8a86f2884d1a58ce7f4`，tree=`1107d877fb5d30f6ee479c8e7da9f19f3866d1d4`。
+- PR [#1](https://github.com/Link2PM/12-/pull/1) 合入 main=`ffb69989b8e4aaffb2e69916efbbde15b0f5647f`；merge tree 与已测试候选 tree 精确一致。
+- 独立 QA/L2：P0–P3=0；staging 的后端 17 项、Caddy validate、约 338 KiB 脱敏 snapshot、ETag 412/428、未认证 401 与双标签同步均 PASS。
+- GitHub Billing 按 Owner 授权跳过，严格登记为 `NOT CI PASS`；未将 zero-step 冒充 CI 通过。
+
+### 6.2 生产发布
+
+- 目标：EC2 `i-0381db4f8d525912d`；后端源目录 `/opt/healthy-sync-release-ffb69989`，systemd unit=`healthy-sync`，仅监听 `127.0.0.1:8787`，无安全组入站暴露。
+- 同源 API：`https://health.gaindar.com/api/health` 返回 `healthy-sync v1.2.0`；未认证 snapshot 为 401、未知 API 为 404、CORS preflight 为 204。服务 enabled/active、restart=0。
+- Caddy 在保留同机其他站点的前提下通过正式 validate 后 reload；`/api/*` 优先于静态 fallback，mutable 资源使用 no-cache。
+- 静态线上字节与候选精确一致：
+
+| 文件 | Production SHA-256 |
+|---|---|
+| `index.html` | `0e4fbf49689d816e7c4b7a22644c82963e217b5205b693979285d58fdf0a0e7e` |
+| `plan.js` | `bf0614e921b5aabb33d7c8b120d4459ae3f6a920854da72f79680cdc91dd0ff4` |
+| `sw.js` | `7c2d76ad39cb4b1c7c61a065227d358dc19ad61a25c29572a74395dbafc3d82f` |
+
+- Cloudflare token 可读取 zone，但精确 purge 请求因权限不足返回认证拒绝；没有把它冒充 purge 成功。实际裸 URL 均为 `CF-Cache-Status: DYNAMIC`、首页为 `no-cache/must-revalidate`，且公网字节 hash 已是新版本，因此不存在待清理的旧静态缓存证据。
+- 最终生产 smoke SSM=`c948ac1f-2221-4eda-8492-169308e6ee38`，结果 `PRODUCTION_SMOKE_PASS`。
+
+### 6.3 备份与回滚
+
+- 发布前备份：`/var/backups/healthy/20260903T135600Z-f1a5d12`。
+- 回滚静态锚即 §5 的 v1.1.0 三文件 hash；同步服务、SQLite 数据与日志均保留，不做删除式回滚。
+- staging service 已停止，独立 staging DB 保留作短期复核锚。
+
+### 6.4 同步密钥与用户待办
+
+- 新生产同步密钥已通过非聊天、非仓库、非日志通道写入生产 `/etc/healthy-sync.env`（0600）。同一值保存在本机 macOS login Keychain：service=`health.gaindar.com Healthy Sync v1.2.0`，account=`link`；已用不带 `-w` 的存在性查询验证，回执不含值。
+- 用户需在持有最新训练数据的 iPhone PWA 中进入设置页，将同步地址设为 `/api/sync`，粘贴上述 Keychain item 的 password，保存后立即同步。不要删除旧主屏图标，先导出备份。
+- 在完成该一步前，只能称“API 与 v1.2.0 前端已上线”，不能称“正式训练快照已上传/跨设备同步已恢复”。
+
+### 6.5 诚实验收边界
+
+- staging 真实双标签 DOM 已 PASS；生产 API、静态字节、版本、鉴权与 CORS 已由公网探针闭环。
+- Chrome 扩展和应用内浏览器均在生产导航阶段超时，因此生产登录态 DOM 自动验收记 `NOT VERIFIED`，未以 staging 或源码冒充。
+- 未向生产 POST 合成训练数据，也未执行“清空所有数据”。正式 snapshot 的首次上传留给用户在持有最新数据的 iPhone PWA 中完成。
