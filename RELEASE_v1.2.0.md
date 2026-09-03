@@ -31,13 +31,13 @@ CTO 只能精确暂存下列文件，禁止 `git add -A`：
 | `plan.js` | `bf0614e921b5aabb33d7c8b120d4459ae3f6a920854da72f79680cdc91dd0ff4` |
 | `sw.js` | `7c2d76ad39cb4b1c7c61a065227d358dc19ad61a25c29572a74395dbafc3d82f` |
 | `scripts/test-v4-integration.js` | `7a232c3f38b2f0f22c45f0a9a3706cdc7aa73c8573f1cc6bf1409384c28d0a62` |
-| `aws-sync/.gitignore` | `e71b675bbc27034ebaa6598afc925bf3a06851e6e2522d550901088e42afed19` |
+| `aws-sync/.gitignore` | `b960db3ce15d152eb3a621af24289db0d773f623c0501a397641bead1b268d18` |
 | `aws-sync/README.md` | `eeecd38927ffafe8763a238892e6ce8e0aca3a8ee4c2245a0f2c33a5660f4cf1` |
 | `aws-sync/server.py` | `e1265cb0cd0c8c44e74e29a307b775c10d8b3ee4af1eec34da3790b12c366b26` |
 | `aws-sync/test_server.py` | `2559ecdb7e9efe0a6e95b8947df9df001d09bc3cfbf3e8cf3f7ec057090385f7` |
 | `aws-sync/deploy/Caddyfile.example` | `d88b45e169b854857a686b3f0b505f8f2a89f3ffffe57708029dc3f9ce0e1a5a` |
-| `aws-sync/deploy/healthy-sync.env.example` | `f9a73c045728d9681eaf8c3c3ea1d0ce7247367dc341c7520f584d9aa2aad8d5` |
-| `aws-sync/deploy/healthy-sync.service` | `c5bfbd2e1b152fbd8f61a8e9f861ecfd12aadf767ce58883ffa4df5eba38d754` |
+| `aws-sync/deploy/healthy-sync.env.example` | `71bd630536e0dfee2c42fe1ebfa90bab13dff901c2e6bbb534f16a858170b629` |
+| `aws-sync/deploy/healthy-sync.service` | `737670ead0863c2490199d556f821a37750662f540f52ac3179575e948c3d491` |
 | `RELEASE_v1.2.0.md` | 交接单自身；CTO 冻结 prospective tree 时重新计算 |
 
 以下内容必须留在本机且不得纳入本次提交或部署：`.claude/`、`.DS_Store`、`STATUS_2026-08-30.md`、训练计划审阅稿/执行卡、Word 文档、AI 报告、`healthy-mcp/` 训练快照、`supabase/` 与 `cloudflare-connector/` 旧实现。不得提交任何真实 `.env`、Bearer 密钥、AI Key、数据库或训练导出 JSON。
