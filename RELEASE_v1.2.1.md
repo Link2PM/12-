@@ -1,6 +1,6 @@
 # Healthy v1.2.1 同步回执热修复交接单
 
-> 状态：本地候选已完成实现、回归与独立审查，等待 CTO exact-tree 复核、生产备份、后端优先发布、前端发布和生产 smoke。正式训练快照在 v1.2.0 客户端提示失败前可能已经写入，必须按“生产已有正式数据”处理。
+> 状态：✅ 2026-09-04 已由 CTO 完成 exact-tree 复核、生产备份、后端优先发布、网关切换、前端发布和生产 smoke。正式训练快照在 v1.2.0 客户端提示失败前已经写入并完整保留；iOS PWA 的最终关闭重开与一次同步确认仍须由用户在原设备完成。
 
 ## 1. 事故结论与修复边界
 
@@ -81,9 +81,13 @@
 
 ## 7. 最终生产回执（由 CTO 填写）
 
-- 冻结候选 commit/tree：以 CTO 交接消息为准；最终合并与生产 commit/tree 由 CTO 回执填写。
-- PR/合并提交：待填写。
-- 备份位置、权限与 SHA-256：待填写（不得含训练正文或密钥）。
-- 服务/Caddy/Cloudflare smoke：待填写。
-- 线上静态文件 SHA-256：待填写。
-- 用户真实同步与只读 counts 核验：待填写。
+- 冻结候选：本地 commit `74266989d41c3a15d9afa56858c0dea24517b728`；GitHub API 等价 commit `c56839dc701d6cabbe8f4ffe77846192f96a4990`；共同 tree `09c21a3cc5caa5294b74582d4fe61d9a08838beb`。
+- PR/合并提交：[PR #3](https://github.com/Link2PM/12-/pull/3)；最终 main `660458cbf49d242442e9d9235149318e3d3f7189`，tree 与测试 tree 完全一致。GitHub Actions 因 Billing 跳过，登记为 `NOT CI PASS`；发布依据为 exact-tree 本地 required-equivalent、17/17 后端测试、独立审查与生产 smoke。
+- 一致性备份：`/var/backups/healthy/20260904T023605Z-pre-v1.2.1`，目录 `root:root`/`0700`、文件 `0600`；`SHA256SUMS` 的 SHA-256 为 `7a646ade1a8c0040809bc5a25680e3f3e889c3855178a779cdcbcdc2d7866465`。备份包含 SQLite、实际 Caddyfile、systemd unit、服务代码与三份静态文件，不含环境文件或密钥；SQLite integrity check 为 `ok`。
+- 部署：生产实例 `i-0381db4f8d525912d`；后端 `healthy-sync 1.2.1` 先发，随后调整实际 Caddy 压缩边界，最后发布 `index.html`/`sw.js`。后端与 Caddy 均 `active/running`、`NRestarts=0`；环境文件保持 `root:root`/`0600`；最终数据库 integrity check 为 `ok`。
+- 服务/API：公网 `/api/health` 200 且版本 `1.2.1`；未鉴权 snapshot 401；未知 API 404；同源 CORS OPTIONS 204；API `Cache-Control: no-store, no-transform`。经鉴权只读矩阵在 `identity`、`gzip`、`br`、`zstd` 四种请求下均得到相同强 ETag，且与正文 `payloadSha256` 完全一致；无 API `Content-Encoding` 改写。
+- Cloudflare：未执行 purge（现有 token 无该权限），采用已批准的替代验收：首页 `CF-Cache-Status: DYNAMIC`、`Cache-Control: no-cache, must-revalidate`，公网裸资源逐字节哈希与候选完全一致。
+- 线上静态哈希：`index.html` = `38b7aa33bf224335546a7dfa520d223a13f76853cda549c671a0b7a1c7e23d17`；`plan.js` = `bf0614e921b5aabb33d7c8b120d4459ae3f6a920854da72f79680cdc91dd0ff4`（内容未变）；`sw.js` = `5b36f469b4bda27a96c9019b6ddac30d634e3570577e7f3b71c135b8634e7734`。公网已确认 `APP_VERSION=1.2.1`、`plan.js?v=1.2.1`、`healthy-v7`。
+- 真实快照只读验收：部署前后均为 `serverRevision=1`、`updatedAt=2026-09-04T01:09:33.530Z`、摘要 `56744af996141d930dba0244f8fba30c04cedac798ffaf1927a8b77600cdf660`；counts 保持 `workoutLogs=561`、`exerciseNotes=281`、`dailyHabits=41`、`bodyMetrics=4`、`settings=3`、`aiAnalysis=8`。发布过程中未执行 POST，未改写、删除或合成正式训练数据。
+- 权限收口：发布包只读临时 IAM policy `healthy-v121-release-get-20260904` 已删除并复核不存在。生产同步密钥未进入仓库、日志或回执；本机 Keychain 存在性已按不读取值方式复核，service=`health.gaindar.com Healthy Sync v1.2.0`、account=`link`。
+- 用户设备最终一步：关闭并重新打开原 iOS 主屏 PWA，确认页面版本 `v1.2.1`；若未自动显示恢复成功，只点击一次“立即同步”。不得删除旧主屏图标、清 Safari 网站数据或反复点击。完成后再用只读 revision/摘要/counts 确认设备端闭环。
