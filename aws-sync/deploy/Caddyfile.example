@@ -1,8 +1,6 @@
 # Recommended same-origin layout. Merge this site block with the active Caddy
 # configuration; do not create a second health.gaindar.com block.
 health.gaindar.com {
-	encode zstd gzip
-
 	# route preserves the written order. Without it, Caddy can sort the broad
 	# /api/* path matcher ahead of the named exact matcher and shadow the API.
 	route {
@@ -18,6 +16,9 @@ health.gaindar.com {
 		}
 
 		handle {
+			# Static assets may be compressed; authenticated API responses above
+			# keep their strong snapshot ETag unchanged.
+			encode zstd gzip
 			root * /srv/healthy
 
 			# These files control upgrades and must be revalidated after every release.

@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 
 SERVICE_NAME = "healthy-sync"
-SERVICE_VERSION = "1.2.0"
+SERVICE_VERSION = "1.2.1"
 MAX_BODY_BYTES = 5 * 1024 * 1024
 SYNC_PATH = "/api/sync"
 SNAPSHOT_PATH = "/api/snapshot"
@@ -471,7 +471,10 @@ class HealthySyncHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("Connection", "close")
-        self.send_header("Cache-Control", "no-store")
+        # ``no-transform`` keeps reverse proxies/CDNs from changing a strong
+        # snapshot ETag while compressing the tiny JSON response.  The browser
+        # also validates the application-level payloadSha256 as a fallback.
+        self.send_header("Cache-Control", "no-store, no-transform")
         self.send_header("X-Content-Type-Options", "nosniff")
         for key, value in self._cors_headers().items():
             self.send_header(key, value)
@@ -524,7 +527,7 @@ class HealthySyncHandler(BaseHTTPRequestHandler):
             return
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Content-Length", "0")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-transform")
         for key, value in self._cors_headers().items():
             self.send_header(key, value)
         self.end_headers()

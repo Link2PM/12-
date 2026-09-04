@@ -57,12 +57,14 @@ Access-Control-Expose-Headers: ETag
 }
 ```
 
-`requestSha256` 是服务端实际收到的请求体字节摘要，供前端核对回执确实对应本次提交。`payloadSha256` 与 ETag 是服务端清理后“持久状态”的规范 JSON SHA-256；计算时有意排除每次请求都会变化的 `exportedAt`。因此同一份训练状态稍后重传会返回 `unchanged: true`，不会推进 `updatedAt` 或 `serverRevision`，但 `syncedAt` 仍表示本次请求被确认的时间。
+`requestSha256` 是服务端实际收到的请求体字节摘要，供前端核对回执确实对应本次提交。`payloadSha256` 与源站 ETag 是服务端清理后“持久状态”的规范 JSON SHA-256；计算时有意排除每次请求都会变化的 `exportedAt`。因此同一份训练状态稍后重传会返回 `unchanged: true`，不会推进 `updatedAt` 或 `serverRevision`，但 `syncedAt` 仍表示本次请求被确认的时间。
+
+API 响应使用 `Cache-Control: no-store, no-transform`，且 Caddy 的压缩只作用于静态资源。即便中间 CDN 仍把强 ETag 弱化、附加编码后缀或移除，v1.2.1 客户端也会以已鉴权 JSON 中的 `payloadSha256` 作为应用级版本并规范化为强 `If-Match`；若响应头仍包含一个 SHA-256，则必须与正文一致，否则拒绝确认。
 
 ### 条件写入协议
 
 1. 空数据库的首次写入可不带 `If-Match`；浏览器因数据库恢复而误带旧 ETag 时也允许作为空库初始化。
-2. 每次成功的 `POST` 和 `GET /api/snapshot` 都返回带双引号的 `ETag`，浏览器应原样持久化。
+2. 每次成功的 `POST` 和 `GET /api/snapshot` 都由源站返回带双引号的强 `ETag`；浏览器以正文 `payloadSha256` 规范化持久化，并在可识别响应头时交叉校验。
 3. 已有快照且本地持久状态发生变化时，`POST` 必须发送 `If-Match: "<上次 ETag>"`。
 4. 缺少条件时返回 `428`，条件已过期时返回 `412`；两者都携带当前 `ETag` 和 `currentPayloadSha256`，且不会写库。
 5. 浏览器遇到 `412`/`428` 后必须停止自动覆盖，先读取云端快照，再由用户确认如何处理。确认用本机数据覆盖时，使用刚读取的当前 ETag 重试。
@@ -174,7 +176,7 @@ curl -i -X POST http://127.0.0.1:8787/api/sync \
 3. 安装并启动 systemd 单元，只监听 `127.0.0.1:8787`；
 4. 将 Caddy 片段合并进现有站点，而不是覆盖其他路由；
 5. 先用独立端口、独立数据库和独立 `HEALTHY_SYNC_USER_KEY` 建立 staging 实例，跑完整写入测试；
-6. 前端切换到同源 `/api/sync` 后，生产环境只做健康检查、鉴权/CORS 检查和已有正式快照的读取验证，不上传合成测试快照；
+6. 前端切换到同源 `/api/sync` 后，确保 `/api/*` 不经过 Caddy `encode`，生产环境只做健康检查、鉴权/CORS 检查和已有正式快照的读取验证，不上传合成测试快照；
 7. 发布 PWA 时更新 Service Worker 缓存名，并清理 CDN 中的 `index.html`、`plan.js`、`sw.js` 缓存。
 
 服务监听回环地址，EC2 安全组不需要为 8787 开放公网入站。Caddy 负责 TLS；应用侧仍会精确校验 Origin。

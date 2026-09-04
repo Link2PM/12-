@@ -1646,9 +1646,9 @@ hr {
 <!-- Toast -->
 <div id="toast" class="toast"></div>
 
-<script src="plan.js?v=1.2.0"></script>
+<script src="plan.js?v=1.2.1"></script>
 <script>
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 // 计划周次范围由 plan.js 的 WEEKS 派生,计划可从任意周次开始(不必从 1 开始)
 const PLAN_FIRST_WEEK = WEEKS[0].weekNum;
 const PLAN_LAST_WEEK = WEEKS[WEEKS.length - 1].weekNum;
@@ -3966,6 +3966,39 @@ function syncProtocolError(message) {
   return error;
 }
 
+function canonicalSyncVersion(responseEtag, payloadSha256) {
+  const digest = typeof payloadSha256 === 'string' ? payloadSha256.toLowerCase() : '';
+  if (!/^[0-9a-f]{64}$/.test(digest)) {
+    throw syncProtocolError('服务端未返回有效的数据版本摘要');
+  }
+
+  // ETag 可能被 Caddy/Cloudflare 的内容压缩改成弱标签、附加编码后缀，
+  // 甚至被移除。JSON 中的 payloadSha256 才是服务端定义的应用级版本；
+  // 若响应头仍含 SHA-256，就继续交叉校验，发现不一致仍立即拒绝。
+  const headerValue = typeof responseEtag === 'string' ? responseEtag.trim() : '';
+  const headerDigest = headerValue.match(/[0-9a-f]{64}/i)?.[0]?.toLowerCase() || '';
+  if (headerDigest && headerDigest !== digest) {
+    throw syncProtocolError('服务端响应头与数据版本不一致');
+  }
+  return `"${digest}"`;
+}
+
+function canonicalSyncJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalSyncJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalSyncJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function syncPayloadStateMatches(remoteSnapshot, localPayload) {
+  return SYNC_COUNT_FIELDS.every(field =>
+    Array.isArray(remoteSnapshot?.[field]) &&
+    Array.isArray(localPayload?.[field]) &&
+    canonicalSyncJson(remoteSnapshot[field]) === canonicalSyncJson(localPayload[field])
+  );
+}
+
 async function sha256Hex(text) {
   if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') {
     throw syncProtocolError('当前浏览器不支持同步回执校验');
@@ -3988,11 +4021,7 @@ function validateSyncReceipt(receipt, responseEtag, requestSha256, requestPayloa
   if (!receipt.counts || SYNC_COUNT_FIELDS.some(field => receipt.counts[field] !== expectedCounts[field])) {
     throw syncProtocolError('服务端回执条数与本次提交不一致');
   }
-  const etagMatch = typeof responseEtag === 'string' && responseEtag.match(/^"([0-9a-f]{64})"$/i);
-  if (!etagMatch || !/^[0-9a-f]{64}$/i.test(receipt.payloadSha256 || '') ||
-      etagMatch[1].toLowerCase() !== receipt.payloadSha256.toLowerCase()) {
-    throw syncProtocolError('服务端未返回可校验的数据版本');
-  }
+  return canonicalSyncVersion(responseEtag, receipt.payloadSha256);
 }
 
 async function fetchCloudSnapshot(syncUrl, secret) {
@@ -4008,14 +4037,15 @@ async function fetchCloudSnapshot(syncUrl, secret) {
     let body = null;
     try { body = text ? JSON.parse(text) : null; } catch (e) { /* 下方统一报错 */ }
     if (!res.ok || !body || body.ok !== true || !body.snapshot) throw new Error(`读取云端快照失败（HTTP ${res.status}）`);
-    const etag = res.headers.get('ETag') || '';
-    const etagMatch = etag.match(/^"([0-9a-f]{64})"$/i);
-    if (!etagMatch || !/^[0-9a-f]{64}$/i.test(body.payloadSha256 || '') ||
-        etagMatch[1].toLowerCase() !== body.payloadSha256.toLowerCase()) {
-      throw new Error('云端快照缺少可校验的数据版本');
+    let etag;
+    try {
+      etag = canonicalSyncVersion(res.headers.get('ETag') || '', body.payloadSha256);
+    } catch (error) {
+      throw new Error(error.message.replace('服务端', '云端快照'));
     }
     return {
       etag,
+      payloadSha256: body.payloadSha256.toLowerCase(),
       snapshot: body.snapshot,
       updatedAt: body.updatedAt || body.syncedAt || null,
       exportedAt: body.exportedAt || body.snapshot.exportedAt || null,
@@ -4026,6 +4056,40 @@ async function fetchCloudSnapshot(syncUrl, secret) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function persistSyncAcknowledgement({
+  syncedAt,
+  serverRevision,
+  payloadSha256,
+  counts,
+  etag,
+  requestRevision,
+  requestDirtyToken
+}) {
+  _syncAckRevision = Math.max(
+    _syncAckRevision,
+    Number(localStorage.getItem(SYNC_ACK_REVISION_KEY) || 0),
+    requestRevision
+  );
+  localStorage.setItem(SYNC_ACK_REVISION_KEY, String(_syncAckRevision));
+  const currentDirtyToken = localStorage.getItem(SYNC_DIRTY_TOKEN_KEY) || '';
+  if (requestDirtyToken && currentDirtyToken === requestDirtyToken) {
+    localStorage.removeItem(SYNC_DIRTY_TOKEN_KEY);
+  }
+  refreshSyncStateFromStorage();
+  clearSyncRetryState();
+  localStorage.removeItem(SYNC_ERROR_KEY);
+  localStorage.setItem(SYNC_ETAG_KEY, etag);
+  await setSetting('lastSyncAt', syncedAt);
+  await setSetting('lastSyncReceipt', {
+    syncedAt,
+    serverRevision: serverRevision ?? null,
+    payloadSha256: payloadSha256 || null,
+    counts: counts || null,
+    etag
+  });
+  updateSyncStatus();
 }
 
 function saveCloudConflictInfo(remote, responseEtag, localPayload) {
@@ -4095,6 +4159,16 @@ async function ensureAwsSyncConfig() {
       clearSyncRetryState({ keepEtag: false });
       markCloudSyncDirty();
     }
+  }
+  // v1.2.0 的严格 ETag 解析会把 CDN 的弱标签/缺失标签误判为永久错误。
+  // v1.2.1 已能从经过完整校验的 payloadSha256 恢复规范版本号，因此只
+  // 清除这一条精确的旧阻断，让仍处于 pending 的真实快照自动补推。
+  if (
+    localStorage.getItem(SYNC_BLOCKED_KEY) === 'request' &&
+    localStorage.getItem(SYNC_ERROR_KEY) === '服务端未返回可校验的数据版本'
+  ) {
+    clearSyncRetryState();
+    localStorage.removeItem(SYNC_ERROR_KEY);
   }
   return normalized;
 }
@@ -4214,31 +4288,17 @@ async function syncToCloud({ silent = true } = {}) {
       throw error;
     }
     const responseEtag = res.headers.get('ETag') || '';
-    validateSyncReceipt(receipt, responseEtag, requestSha256, requestPayload);
+    const canonicalEtag = validateSyncReceipt(receipt, responseEtag, requestSha256, requestPayload);
 
-    _syncAckRevision = Math.max(
-      _syncAckRevision,
-      Number(localStorage.getItem(SYNC_ACK_REVISION_KEY) || 0),
-      requestRevision
-    );
-    localStorage.setItem(SYNC_ACK_REVISION_KEY, String(_syncAckRevision));
-    const currentDirtyToken = localStorage.getItem(SYNC_DIRTY_TOKEN_KEY) || '';
-    if (requestDirtyToken && currentDirtyToken === requestDirtyToken) {
-      localStorage.removeItem(SYNC_DIRTY_TOKEN_KEY);
-    }
-    refreshSyncStateFromStorage();
-    clearSyncRetryState();
-    localStorage.removeItem(SYNC_ERROR_KEY);
-    if (responseEtag) localStorage.setItem(SYNC_ETAG_KEY, responseEtag);
-    await setSetting('lastSyncAt', receipt.syncedAt);
-    await setSetting('lastSyncReceipt', {
+    await persistSyncAcknowledgement({
       syncedAt: receipt.syncedAt,
-      serverRevision: receipt.serverRevision || null,
-      payloadSha256: receipt.payloadSha256 || null,
-      counts: receipt.counts || null,
-      etag: responseEtag || null
+      serverRevision: receipt.serverRevision,
+      payloadSha256: receipt.payloadSha256,
+      counts: receipt.counts,
+      etag: canonicalEtag,
+      requestRevision,
+      requestDirtyToken
     });
-    updateSyncStatus();
     if (!silent) showToast('✓ 已同步到云端');
     return receipt;
   } catch (e) {
@@ -4248,13 +4308,42 @@ async function syncToCloud({ silent = true } = {}) {
     const isTransportFailure = e.name === 'AbortError' || typeof e.status !== 'number';
     const retryable = isTransportFailure || e.retryable === true;
     nextRetryDelayMs = e.retryAfterMs || 0;
+    let conflictInspected = false;
+    if (!retryable && e.blocked === 'conflict' && requestPayload) {
+      try {
+        const remote = await fetchCloudSnapshot(url, secret);
+        if (syncPayloadStateMatches(remote.snapshot, requestPayload)) {
+          await persistSyncAcknowledgement({
+            syncedAt: remote.updatedAt || remote.exportedAt || new Date().toISOString(),
+            serverRevision: remote.serverRevision,
+            payloadSha256: remote.payloadSha256,
+            counts: remote.counts,
+            etag: remote.etag,
+            requestRevision,
+            requestDirtyToken
+          });
+          if (!silent) showToast('✓ 云端已有完全相同的数据，已恢复同步');
+          return {
+            ok: true,
+            recovered: true,
+            unchanged: true,
+            syncedAt: remote.updatedAt || remote.exportedAt || null,
+            serverRevision: remote.serverRevision,
+            payloadSha256: remote.payloadSha256,
+            counts: remote.counts
+          };
+        }
+        saveCloudConflictInfo(remote, remote.etag, requestPayload);
+        conflictInspected = true;
+      } catch (inspectError) {
+        localStorage.removeItem(SYNC_CONFLICT_INFO_KEY);
+        console.error('读取云端冲突摘要失败', inspectError);
+      }
+    }
     if (!retryable) {
       _syncBlocked = e.blocked || 'request';
       localStorage.setItem(SYNC_BLOCKED_KEY, _syncBlocked);
-      if (_syncBlocked === 'conflict' && e.responseEtag) {
-        localStorage.setItem(SYNC_CONFLICT_ETAG_KEY, e.responseEtag);
-      }
-      if (_syncBlocked === 'conflict') {
+      if (_syncBlocked === 'conflict' && !conflictInspected) {
         try {
           await captureCloudConflict(url, secret, e.responseEtag || '', requestPayload);
         } catch (inspectError) {
@@ -4326,7 +4415,7 @@ async function updateSyncStatus() {
   } else if (_syncBlocked === 'auth') {
     el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--bad);">⚠ 鉴权失败，已停止自动重试。请检查同步地址和密钥后保存。${last ? `<br>上次成功: ${new Date(last).toLocaleString()}` : ''}</div>`;
   } else if (_syncBlocked) {
-    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--bad);">⚠ 请求无法被服务端接受，已停止自动重试${error ? ` · ${escHtml(error)}` : ''}。请检查配置或应用版本。</div>`;
+    el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--bad);">⚠ 同步请求或服务端回执未通过校验，已停止自动重试${error ? ` · ${escHtml(error)}` : ''}。请检查配置或应用版本。</div>`;
   } else if (_syncDirty) {
     el.innerHTML = `<div style="margin-top: 8px; font-size: 12px; color: var(--warn);">⏳ 有待同步变更${error ? ` · ${escHtml(error)}` : ''}${last ? `<br>上次成功: ${new Date(last).toLocaleString()}` : ''}</div>`;
   } else if (last) {
