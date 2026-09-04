@@ -222,24 +222,47 @@ function verifyProductionSyncReceiptChecks(indexSource) {
     receipt: validReceipt
   };
   vm.createContext(context);
-  const functions = ['syncCounts', 'syncProtocolError', 'validateSyncReceipt']
+  const functions = ['syncCounts', 'syncProtocolError', 'canonicalSyncVersion', 'validateSyncReceipt']
     .map(name => extractFunctionDeclaration(indexSource, name)).join('\n');
   vm.runInContext(functions, context, { timeout: 5000 });
-  vm.runInContext('validateSyncReceipt(receipt, responseEtag, requestSha256, payload)', context, { timeout: 5000 });
+  for (const transformedEtag of [
+    `"${payloadSha256}"`,
+    `W/"${payloadSha256}"`,
+    `"${payloadSha256}-zstd"`,
+    ''
+  ]) {
+    context.responseEtag = transformedEtag;
+    const canonical = vm.runInContext(
+      'validateSyncReceipt(receipt, responseEtag, requestSha256, payload)',
+      context,
+      { timeout: 5000 }
+    );
+    assert.strictEqual(canonical, `"${payloadSha256}"`, `failed to canonicalize ETag: ${transformedEtag || '(missing)'}`);
+  }
 
   const invalidReceipts = [
     { ...validReceipt, requestSha256: 'c'.repeat(64) },
     { ...validReceipt, strippedSettings: ['startDate'] },
     { ...validReceipt, counts: { ...validReceipt.counts, workoutLogs: 0 } },
-    { ...validReceipt, payloadSha256: 'd'.repeat(64) }
+    { ...validReceipt, payloadSha256: 'd'.repeat(64) },
+    { ...validReceipt, payloadSha256: '' },
+    { ...validReceipt, payloadSha256: 'b'.repeat(63) },
+    { ...validReceipt, payloadSha256: 'g'.repeat(64) }
   ];
   for (const invalid of invalidReceipts) {
     context.receipt = invalid;
+    context.responseEtag = `"${payloadSha256}"`;
     assert.throws(
       () => vm.runInContext('validateSyncReceipt(receipt, responseEtag, requestSha256, payload)', context, { timeout: 5000 }),
       /服务端/
     );
   }
+  context.receipt = validReceipt;
+  context.responseEtag = `W/"${'c'.repeat(64)}"`;
+  assert.throws(
+    () => vm.runInContext('validateSyncReceipt(receipt, responseEtag, requestSha256, payload)', context, { timeout: 5000 }),
+    /不一致/
+  );
 }
 
 function createMemoryStorage(initial = {}) {
@@ -253,7 +276,10 @@ function createMemoryStorage(initial = {}) {
 
 function createProductionSyncTab(indexSource, localStorage, tabName, fetchImpl) {
   let uuidCounter = 0;
+  const savedSettings = new Map();
+  const capturedErrors = [];
   const context = {
+    URL,
     localStorage,
     window: {
       location: { href: 'https://health.gaindar.com/' },
@@ -265,23 +291,29 @@ function createProductionSyncTab(indexSource, localStorage, tabName, fetchImpl) 
     AbortController,
     setTimeout: () => 1,
     clearTimeout: () => {},
-    console: { error: () => {} },
-    getSetting: async key => key === 'syncUrl' ? '/api/sync' : key === 'syncSecret' ? 'test-secret' : null,
-    setSetting: async () => {},
+    console: { error: (...args) => { capturedErrors.push(args); } },
+    getSetting: async key => key === 'syncUrl'
+      ? '/api/sync'
+      : key === 'syncSecret'
+        ? 'test-secret'
+        : savedSettings.get(key) ?? null,
+    setSetting: async (key, value) => { savedSettings.set(key, value); },
     normalizeSyncUrl: value => value || '/api/sync',
     assembleSyncPayload: async () => ({
-      exportedAt: '2026-09-03T12:00:00.000Z', appVersion: '1.2.0',
+      exportedAt: '2026-09-03T12:00:00.000Z', appVersion: '1.2.1',
       workoutLogs: [], exerciseNotes: [], dailyHabits: [], bodyMetrics: [], settings: [], aiAnalysis: []
     }),
     sha256Hex: async () => 'a'.repeat(64),
-    validateSyncReceipt: () => {},
     fetch: fetchImpl,
-    syncFailurePolicy: () => ({ retryable: false, blocked: 'request' }),
+    syncFailurePolicy: status => [412, 428].includes(status)
+      ? { retryable: false, blocked: 'conflict' }
+      : { retryable: false, blocked: 'request' },
     updateSyncStatus: () => {},
     showToast: () => {},
     retryCalls: 0
   };
   Object.assign(context, {
+    SYNC_COUNT_FIELDS: ['workoutLogs', 'exerciseNotes', 'dailyHabits', 'bodyMetrics', 'settings', 'aiAnalysis'],
     SYNC_REVISION_KEY: 'healthySyncRevision',
     SYNC_ACK_REVISION_KEY: 'healthySyncAckRevision',
     SYNC_DIRTY_TOKEN_KEY: 'healthySyncDirtyToken',
@@ -303,9 +335,24 @@ function createProductionSyncTab(indexSource, localStorage, tabName, fetchImpl) 
   });
   context._syncDirty = Boolean(context._syncDirtyToken) || context._syncRevision > context._syncAckRevision;
   context.scheduleSyncRetry = () => { context.retryCalls += 1; };
+  context._savedSettings = savedSettings;
+  context._capturedErrors = capturedErrors;
 
   vm.createContext(context);
   const functions = [
+    'syncCounts',
+    'compactSyncCounts',
+    'syncCountDifference',
+    'syncProtocolError',
+    'canonicalSyncVersion',
+    'validateSyncReceipt',
+    'canonicalSyncJson',
+    'syncPayloadStateMatches',
+    'snapshotUrlForSync',
+    'fetchCloudSnapshot',
+    'saveCloudConflictInfo',
+    'captureCloudConflict',
+    'persistSyncAcknowledgement',
     'refreshSyncStateFromStorage',
     'newSyncDirtyToken',
     'clearSyncRetryState',
@@ -320,7 +367,7 @@ function successfulSyncResponse() {
   const payloadSha256 = 'b'.repeat(64);
   return {
     ok: true,
-    headers: { get: name => name === 'ETag' ? `"${payloadSha256}"` : '' },
+    headers: { get: name => name === 'ETag' ? `W/"${payloadSha256}"` : '' },
     text: async () => JSON.stringify({
       ok: true,
       syncedAt: '2026-09-03T12:00:00.000Z',
@@ -334,6 +381,120 @@ function successfulSyncResponse() {
       }
     })
   };
+}
+
+async function verifyLostReceiptUpgradeRecovery(indexSource) {
+  const payloadSha256 = 'b'.repeat(64);
+  const remoteSnapshot = {
+    exportedAt: '2026-09-04T00:50:00.000Z',
+    appVersion: '1.2.0',
+    workoutLogs: [], exerciseNotes: [], dailyHabits: [],
+    bodyMetrics: [], settings: [], aiAnalysis: []
+  };
+  const storage = createMemoryStorage({
+    healthySyncRevision: '1',
+    healthySyncAckRevision: '0',
+    healthySyncDirtyToken: 'v120-lost-receipt'
+  });
+  const calls = [];
+  let postCount = 0;
+  const tab = createProductionSyncTab(indexSource, storage, 'lost-receipt', async (url, options) => {
+    calls.push({ url, method: options.method, headers: { ...options.headers } });
+    if (options.method === 'POST' && postCount++ === 0) {
+      return {
+        ok: false,
+        status: 428,
+        headers: { get: name => name === 'ETag' ? `W/"${payloadSha256}"` : '' },
+        text: async () => JSON.stringify({
+          ok: false,
+          error: 'precondition_required',
+          currentPayloadSha256: payloadSha256
+        })
+      };
+    }
+    if (options.method === 'GET') {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => '' },
+        text: async () => JSON.stringify({
+          ok: true,
+          snapshot: remoteSnapshot,
+          payloadSha256,
+          updatedAt: '2026-09-04T00:50:01.000Z',
+          exportedAt: remoteSnapshot.exportedAt,
+          appVersion: remoteSnapshot.appVersion,
+          serverRevision: 1,
+          counts: {
+            workoutLogs: 0, exerciseNotes: 0, dailyHabits: 0,
+            bodyMetrics: 0, settings: 0, aiAnalysis: 0
+          }
+        })
+      };
+    }
+    return successfulSyncResponse();
+  });
+
+  const recovered = await vm.runInContext('syncToCloud({ silent: true })', tab, { timeout: 5000 });
+  assert.strictEqual(recovered.recovered, true, 'lost v1.2.0 receipt must recover when every durable data array matches');
+  assert.deepStrictEqual(calls.slice(0, 2).map(call => call.method), ['POST', 'GET'], 'lost receipt recovery must inspect cloud after 428');
+  assert.strictEqual(storage.getItem('healthySyncEtag'), `"${payloadSha256}"`, 'recovery must persist a canonical strong If-Match token');
+  assert.strictEqual(storage.getItem('healthySyncDirtyToken'), null, 'matching cloud snapshot must acknowledge the pending token');
+  assert.strictEqual(storage.getItem('healthySyncBlocked'), null, 'matching cloud snapshot must not remain conflict-blocked');
+  assert.strictEqual(tab._savedSettings.get('lastSyncReceipt').etag, `"${payloadSha256}"`, 'recovered receipt must record canonical version');
+
+  vm.runInContext('markCloudSyncDirty()', tab, { timeout: 5000 });
+  await vm.runInContext('syncToCloud({ silent: true })', tab, { timeout: 5000 });
+  const followUpPost = calls.find((call, index) => index >= 2 && call.method === 'POST');
+  assert.strictEqual(followUpPost.headers['If-Match'], `"${payloadSha256}"`, 'next mutation must send the recovered canonical If-Match');
+
+  const differentStorage = createMemoryStorage({
+    healthySyncRevision: '1',
+    healthySyncAckRevision: '0',
+    healthySyncDirtyToken: 'different-remote'
+  });
+  let differentCall = 0;
+  let differentPostCount = 0;
+  let confirmedIfMatch = null;
+  const differentTab = createProductionSyncTab(indexSource, differentStorage, 'different-remote', async (url, options) => {
+    differentCall += 1;
+    if (options.method === 'POST') {
+      if (differentPostCount++ > 0) {
+        confirmedIfMatch = options.headers['If-Match'];
+        return successfulSyncResponse();
+      }
+      return {
+        ok: false,
+        status: 428,
+        headers: { get: () => '' },
+        text: async () => JSON.stringify({ ok: false, error: 'precondition_required', currentPayloadSha256: payloadSha256 })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: name => name === 'ETag' ? `W/"${payloadSha256}"` : '' },
+      text: async () => JSON.stringify({
+        ok: true,
+        snapshot: { ...remoteSnapshot, workoutLogs: [{ id: 99 }] },
+        payloadSha256,
+        updatedAt: '2026-09-04T00:50:01.000Z',
+        serverRevision: 1,
+        counts: {
+          workoutLogs: 1, exerciseNotes: 0, dailyHabits: 0,
+          bodyMetrics: 0, settings: 0, aiAnalysis: 0
+        }
+      })
+    };
+  });
+  const conflict = await vm.runInContext('syncToCloud({ silent: true })', differentTab, { timeout: 5000 });
+  assert.strictEqual(conflict.ok, false, 'different cloud data must not be auto-acknowledged');
+  assert.strictEqual(differentStorage.getItem('healthySyncBlocked'), 'conflict', 'different cloud data must remain conflict-blocked');
+  assert(differentStorage.getItem('healthySyncDirtyToken'), 'different cloud data must preserve the pending local token');
+  assert(differentStorage.getItem('healthySyncConflictInfo'), 'different cloud data must retain a conflict summary');
+  assert.strictEqual(differentCall, 2, 'different cloud data should use one POST and one read-only GET');
+  await vm.runInContext('syncToCloud({ silent: false })', differentTab, { timeout: 5000 });
+  assert.strictEqual(confirmedIfMatch, `"${payloadSha256}"`, 'confirmed overwrite must use canonical ETag, never the weak 428 header');
 }
 
 async function verifyProductionSyncDirtyTokenConcurrency(indexSource) {
@@ -365,8 +526,13 @@ async function verifyProductionSyncDirtyTokenConcurrency(indexSource) {
   const restartedTab = createProductionSyncTab(indexSource, storage, 'restarted', async () => successfulSyncResponse());
   assert.strictEqual(vm.runInContext('_syncDirty', restartedTab), true, 'restart must recover unsynced state from tab B token');
   await vm.runInContext('syncToCloud({ silent: true })', restartedTab, { timeout: 5000 });
-  assert.strictEqual(storage.getItem('healthySyncDirtyToken'), null, 'non-concurrent acknowledgement must clear its captured token');
+  assert.strictEqual(
+    storage.getItem('healthySyncDirtyToken'),
+    null,
+    `non-concurrent acknowledgement must clear its captured token; errors=${restartedTab._capturedErrors.map(parts => parts.map(String).join(' ')).join(' | ')}`
+  );
   assert.strictEqual(vm.runInContext('_syncDirty', restartedTab), false, 'tab must become clean after acknowledging the latest token');
+  assert.strictEqual(storage.getItem('healthySyncEtag'), `"${'b'.repeat(64)}"`, 'weak success ETag must persist as a canonical strong token');
   assert.strictEqual(
     storage.getItem('healthySyncRevision'),
     storage.getItem('healthySyncAckRevision'),
@@ -389,6 +555,7 @@ function createLegacyMigrationContext(indexSource, legacySettings) {
     SYNC_REVISION_KEY: 'healthySyncRevision',
     SYNC_ACK_REVISION_KEY: 'healthySyncAckRevision',
     SYNC_DIRTY_TOKEN_KEY: 'healthySyncDirtyToken',
+    SYNC_ERROR_KEY: 'healthySyncLastError',
     SYNC_ETAG_KEY: 'healthySyncEtag',
     SYNC_CONFLICT_ETAG_KEY: 'healthySyncConflictEtag',
     SYNC_CONFLICT_INFO_KEY: 'healthySyncConflictInfo',
@@ -477,6 +644,22 @@ async function verifyLegacySettingsMigrationOrder(indexSource) {
   assert.strictEqual(await vm.runInContext("getSetting('syncSecret')", context), 'legacy-local-secret', 'AWS URL migration must not hide the recovered sync secret');
   assert.strictEqual(JSON.parse(context.localStorage.getItem('pwa_settings')).length, legacySettings.length, 'default URL migration must not replace the recovered settings store');
   assert(context.localStorage.getItem('healthySyncDirtyToken'), 'migrating a configured legacy endpoint must leave a durable dirty token');
+
+  const recoveryContext = createLegacyMigrationContext(indexSource, []);
+  recoveryContext.localStorage.setItem('healthySyncBlocked', 'request');
+  recoveryContext.localStorage.setItem('healthySyncLastError', '服务端未返回可校验的数据版本');
+  recoveryContext.localStorage.setItem('healthySyncDirtyToken', 'v120-pending');
+  vm.runInContext("_syncBlocked = 'request'", recoveryContext, { timeout: 5000 });
+  await vm.runInContext('ensureAwsSyncConfig()', recoveryContext, { timeout: 5000 });
+  assert.strictEqual(recoveryContext.localStorage.getItem('healthySyncBlocked'), null, 'v1.2.0 ETag false positive must be unblocked after upgrade');
+  assert.strictEqual(recoveryContext.localStorage.getItem('healthySyncLastError'), null, 'obsolete v1.2.0 ETag error must be cleared after upgrade');
+  assert.strictEqual(recoveryContext.localStorage.getItem('healthySyncDirtyToken'), 'v120-pending', 'upgrade recovery must preserve the pending snapshot token');
+  recoveryContext.localStorage.setItem('healthySyncBlocked', 'request');
+  recoveryContext.localStorage.setItem('healthySyncLastError', '服务端未返回有效的数据版本摘要');
+  vm.runInContext("_syncBlocked = 'request'", recoveryContext, { timeout: 5000 });
+  await vm.runInContext('ensureAwsSyncConfig()', recoveryContext, { timeout: 5000 });
+  assert.strictEqual(recoveryContext.localStorage.getItem('healthySyncBlocked'), 'request', 'a later protocol error must remain fail-closed');
+  assert.strictEqual(recoveryContext.localStorage.getItem('healthySyncLastError'), '服务端未返回有效的数据版本摘要', 'a later protocol error must not be cleared');
 }
 
 function verifyServiceWorkerPrivacyRouting(swSource) {
@@ -518,7 +701,7 @@ function verifyServiceWorkerPrivacyRouting(swSource) {
 
   assert.strictEqual(isIntercepted('/api/snapshot'), false, 'private snapshot API must bypass Service Worker');
   assert.strictEqual(isIntercepted('/api/health'), false, 'all API routes must bypass Service Worker');
-  assert.strictEqual(isIntercepted('/plan.js?v=1.2.0'), true, 'versioned plan asset should be cached');
+  assert.strictEqual(isIntercepted('/plan.js?v=1.2.1'), true, 'versioned plan asset should be cached');
   assert.strictEqual(isIntercepted('/private-export.json'), false, 'arbitrary same-origin GET must not be cached');
   assert.strictEqual(isIntercepted('/index.html', { authorization: true }), false, 'authorized GET must never be cached');
   assert.strictEqual(isIntercepted('/week/20', { mode: 'navigate' }), true, 'navigation should retain offline fallback');
@@ -679,8 +862,8 @@ if (!usePrivateSnapshot) {
 
 // 6) 版本、缓存与同步安全配置静态门禁。
 const sw = fs.readFileSync(swPath, 'utf8');
-assert(index.includes("const APP_VERSION = '1.2.0'"));
-assert(index.includes('plan.js?v=1.2.0'));
+assert(index.includes("const APP_VERSION = '1.2.1'"));
+assert(index.includes('plan.js?v=1.2.1'));
 assert(!index.includes("appVersion: '1.1.0'"));
 assert(index.includes("const DEFAULT_SYNC_URL = '/api/sync'"));
 assert(index.includes("new Set(['startDate', 'aiProvider', 'aiModel'])"));
@@ -689,6 +872,7 @@ assert(index.includes("receipt.ok !== true"));
 assert(index.includes('AbortController'));
 assert(index.includes("headers['If-Match'] = etag"));
 assert(index.includes('fetchCloudSnapshot'));
+assert(index.includes('canonicalSyncVersion'));
 assert(index.includes("[412, 428].includes(status)"));
 assert(index.includes('scheduleSyncRetry'));
 assert(index.includes('downloadCloudConflictSnapshot'));
@@ -700,14 +884,15 @@ assert(index.includes('receipt.counts[field] !== expectedCounts[field]'));
 assert(index.includes("localStorage.removeItem('noteBackup')"));
 assert(index.includes("result = await syncToCloud({ silent: false })"));
 assert(index.includes("window.addEventListener('storage'"));
-assert(sw.includes("const CACHE_NAME = 'healthy-v6'"));
-assert(sw.includes("'./plan.js?v=1.2.0'"));
+assert(sw.includes("const CACHE_NAME = 'healthy-v7'"));
+assert(sw.includes("'./plan.js?v=1.2.1'"));
 assert(sw.includes("url.pathname.startsWith('/api/')"));
 assert(sw.includes("e.request.headers.has('Authorization')"));
 assert(sw.indexOf("url.pathname.startsWith('/api/')") < sw.indexOf('e.respondWith('));
 verifyProductionSyncReceiptChecks(index);
 verifyServiceWorkerPrivacyRouting(sw);
 await verifyProductionSyncDirtyTokenConcurrency(index);
+await verifyLostReceiptUpgradeRecovery(index);
 await verifyLegacySettingsMigrationOrder(index);
 
 console.log(`PASS: V4 ${v4Weeks.length} weeks, ${v4Names.length} unique exercise names, ${migration.firstFilled} historical logs backfilled by production code (${historyFixtureLabel}), full legacy objects/history/video/version/sync guards verified.`);

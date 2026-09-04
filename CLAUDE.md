@@ -1,6 +1,6 @@
 # 体态修复训练手册 — 项目文档
 
-> **2026-09-03 状态提示**：V4 计划与 AWS 同步修复已形成 v1.2.0 本地发布候选，尚待 CTO 复核和生产部署。训练快照、迁移前同步状态及恢复基线详见 `STATUS_2026-08-30.md`；仓库中的 Supabase / 旧 Cloudflare 读取实现仅作历史参考。
+> **2026-09-04 状态提示**：v1.2.0 已上线；首次真实同步暴露出 CDN 压缩改写强 ETag 的兼容问题，v1.2.1 热修复待发布。训练快照、迁移前同步状态及恢复基线详见 `STATUS_2026-08-30.md`；仓库中的 Supabase / 旧 Cloudflare 读取实现仅作历史参考。
 
 ## 项目概述
 
@@ -8,7 +8,7 @@
 
 **GitHub**: https://github.com/Link2PM/12-  
 **线上地址**: https://health.gaindar.com/ （用户已确认；原 GitHub Pages 地址不再视为生产入口）<br>
-**当前发布候选**: v1.2.0（生产环境在本次上线前仍为 v1.1.0）
+**当前发布候选**: v1.2.1（生产环境当前为 v1.2.0）
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式  
 **开源版**: 应用壳的通用化版本在 `healthy-app-template` 模板仓库（配套 `healthy-coach-skill` 生成个人计划），本仓库是个人实例 + 上游源头：应用壳改动先在这里验证，再同步到模板仓库
 
@@ -82,15 +82,15 @@ healthy-mcp/data/*.json  — 本地训练数据备份（真实数据已由子目
 与 localStorage 同构，额外包含：
 - `media` store：照片/视频 Blob，通过 `noteId` 关联到 exerciseNotes
 
-### 生产远端与本地备份（更新至 2026-09-03）
+### 生产远端与本地备份（更新至 2026-09-04）
 
-- 生产数据库：用户确认已从 Supabase 迁移到自有 AWS；旧浏览器仍指向已停服的 Supabase Edge Function，是同步失败的直接原因。
-- v1.2.0 默认使用同源 `/api/sync`。`aws-sync/` 提供已通过本地端到端测试的 EC2 + SQLite 最小服务候选；只有 CTO 部署并完成生产 smoke 后，才能称生产同步恢复。
+- 生产数据库已从 Supabase 迁移到自有 AWS；截至 2026-09-04，`healthy-sync 1.2.0` 与同源 `/api/sync` 已上线。
+- 首次正式同步已通过鉴权并收到有效正文回执，但 Caddy/Cloudflare 压缩链路弱化或移除了强 ETag，导致 v1.2.0 客户端误判失败。v1.2.1 同时增加 `no-transform`、应用级 `payloadSha256` 规范化和丢失回执恢复；完成 CTO 生产 smoke 与用户重试前仍不得声称同步闭环恢复。
 - 前端以持久化 revision 标记待同步变更，启动/联网/回前台可补推；网络与 5xx 采用退避重试，永久 4xx 停止自动重试，版本冲突不得静默覆盖。
 - 同步 payload 仅允许 `startDate`、`aiProvider`、`aiModel` 三个安全设置；AI Key、同步密钥、同步 URL 和媒体数据不得上传。服务端还会二次过滤/拒绝敏感字段。
 - 浏览器导出快照仍带有旧 Supabase 同步设置，`lastSyncAt` 停在 2026-08-07；因此本地数据完整不等于 AWS 已同步。
 - 最新脱敏训练备份位于 `healthy-mcp/data/posture-recovery-2026-08-30.json`，数据截止 2026-08-28。
-- 旧 `supabase/` 与远程 MCP 读取代码保留作历史参考，不参与 v1.2.0 发布。
+- 旧 `supabase/` 与远程 MCP 读取代码保留作历史参考，不参与 v1.2.1 发布。
 
 ### ⚠️ iOS PWA 存储隔离（重要运维知识）
 
@@ -189,7 +189,7 @@ V4 使用 App Week 19 作为不补课的过渡/校准周，正式 12 周为 App 
 ## 开发注意事项
 
 1. **修改后验证**: 至少运行 `node scripts/validate-plan.js`、`node scripts/test-v4-integration.js`、`node --check plan.js`、`node --check sw.js`、index 内联脚本解析检查，以及 `python3 -m unittest discover -s aws-sync -p 'test_*.py' -v`
-2. **版本号**: 采用语义化三段式 `major.minor.patch`。版本集中在 `APP_VERSION`，同时检查设置页、同步 payload、JSON 导出、`plan.js?v=...` 和 Service Worker cache；本轮为 v1.2.0 / `healthy-v6`
+2. **版本号**: 采用语义化三段式 `major.minor.patch`。版本集中在 `APP_VERSION`，同时检查设置页、同步 payload、JSON 导出、`plan.js?v=...` 和 Service Worker cache；本轮为 v1.2.1 / `healthy-v7`
 3. **新增 Store**: 需改 4 处：`LS_STORES` 数组、`DB_VERSION` + `onupgradeneeded`、`_lsPut/_lsGet/_lsDelete` 的 keyField 条件、`clearAllData` 的 stores 列表
 4. **导出兼容**: 新增数据表时，需同步更新 `exportJSON()`、`importData()`、`previewImport()`、`debugStorageStatus()`
 5. **推送/部署**: `git push origin main` 不等于生产发布。实现任务先冻结精确文件与哈希，再交给 CTO 任务完成 exact-tree 复核、服务端与静态资源部署、Cloudflare 清缓存和生产 smoke；GitHub Billing 可以登记为跳过，但不能写成 CI PASS

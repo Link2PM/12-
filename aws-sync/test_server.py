@@ -143,7 +143,9 @@ class HealthySyncEndToEndTest(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertTrue(body["ok"])
         self.assertEqual("healthy-sync", body["service"])
+        self.assertEqual("1.2.1", body["version"])
         self.assertEqual(ORIGIN, headers["Access-Control-Allow-Origin"])
+        self.assertIn("no-transform", headers["Cache-Control"])
 
         status, body, headers = self.request(
             "OPTIONS",
@@ -157,6 +159,7 @@ class HealthySyncEndToEndTest(unittest.TestCase):
         self.assertIn("Authorization", headers["Access-Control-Allow-Headers"])
         self.assertIn("If-Match", headers["Access-Control-Allow-Headers"])
         self.assertEqual("ETag", headers["Access-Control-Expose-Headers"])
+        self.assertIn("no-transform", headers["Cache-Control"])
 
     def test_disallowed_origin_and_missing_auth_are_rejected(self) -> None:
         status, body, _ = self.request(
