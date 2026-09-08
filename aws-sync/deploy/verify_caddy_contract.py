@@ -9,7 +9,8 @@ This verifier intentionally checks ownership as well as route content:
   broad unknown-API matcher;
 * compression is allowed only in the static handler, never around the API.
 
-It is a repository/deployment guard, not a Caddy syntax parser. Run it before
+It is a repository/deployment guard, not a Caddy syntax parser, and it does not
+recursively prove the contents of unrelated imported files. Run it before
 ``caddy validate``; then run the documented direct-origin smoke after reload.
 """
 
@@ -23,6 +24,7 @@ from typing import Sequence
 
 
 CANONICAL_IMPORT = "/etc/caddy/healthy.caddy"
+PRODUCTION_ROOT = Path("/etc/caddy/Caddyfile")
 HEALTHY_HOST = "health.gaindar.com"
 HEALTHY_UPSTREAM = "127.0.0.1:8787"
 SYNC_PATHS = (
@@ -123,6 +125,23 @@ def _tokens(line: str) -> tuple[str, ...]:
         raise ContractError(f"cannot parse directive {line!r}: {error}") from error
 
 
+def _site_opener_mentions_healthy(line: str) -> bool:
+    """Recognize common Caddy address spellings for the Healthy host."""
+    if not _is_block_opener(line):
+        return False
+    for token in _tokens(line[:-1].strip()):
+        for address in token.split(","):
+            normalized = address.strip().lower()
+            for scheme in ("https://", "http://"):
+                if normalized.startswith(scheme):
+                    normalized = normalized[len(scheme) :]
+                    break
+            authority = normalized.split("/", 1)[0]
+            if authority == HEALTHY_HOST or authority.startswith(f"{HEALTHY_HOST}:"):
+                return True
+    return False
+
+
 def verify_root_contract(root_text: str) -> None:
     lines = _logical_lines(root_text)
     direct = _direct_lines(lines)
@@ -132,7 +151,7 @@ def verify_root_contract(root_text: str) -> None:
         raise ContractError(
             f"shared root must contain exactly one top-level {import_line!r}; found {import_count}"
         )
-    if any(line == f"{HEALTHY_HOST} {{" for line in lines):
+    if any(_site_opener_mentions_healthy(line) for line in lines):
         raise ContractError("shared root must not inline the Healthy site block")
 
 
@@ -215,29 +234,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path("/etc/caddy/Caddyfile"),
+        default=PRODUCTION_ROOT,
         help="shared root Caddyfile (default: /etc/caddy/Caddyfile)",
     )
     parser.add_argument(
-        "--fragment",
+        "--candidate-fragment",
         type=Path,
-        default=Path(CANONICAL_IMPORT),
-        help=f"Healthy-owned fragment (default: {CANONICAL_IMPORT})",
+        help=(
+            "repository/staging candidate only; production mode deliberately reads "
+            f"the installed {CANONICAL_IMPORT} named by the root import"
+        ),
     )
     return parser
+
+
+def resolve_fragment_path(root_path: Path, candidate_fragment: Path | None) -> tuple[Path, str]:
+    """Bind production verification to the fragment the root actually imports."""
+    if candidate_fragment is None:
+        return Path(CANONICAL_IMPORT), "installed"
+    if root_path.resolve(strict=False) == PRODUCTION_ROOT.resolve(strict=False):
+        raise ContractError(
+            "candidate fragment cannot be paired with the production root; "
+            f"omit --candidate-fragment to inspect installed {CANONICAL_IMPORT}"
+        )
+    return candidate_fragment, "candidate"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        fragment_path, mode = resolve_fragment_path(args.root, args.candidate_fragment)
         root_text = args.root.read_text(encoding="utf-8")
-        fragment_text = args.fragment.read_text(encoding="utf-8")
+        fragment_text = fragment_path.read_text(encoding="utf-8")
         verify_contract(root_text, fragment_text)
     except (OSError, ContractError) as error:
         print(f"FAIL: Healthy Caddy contract: {error}", file=sys.stderr)
         return 1
     print(
-        "PASS: shared root imports the Healthy-owned fragment and exact API/static route contract is intact"
+        f"PASS ({mode}): shared root imports the Healthy-owned fragment and exact "
+        "API/static route contract is intact"
     )
     return 0
 

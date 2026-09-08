@@ -1,4 +1,6 @@
-# Shared-host root Caddyfile example.
+# Shared-host root Caddyfile import snippet. DO NOT copy this file over
+# /etc/caddy/Caddyfile; edit the existing shared root in place and preserve
+# every other project's site block and import.
 #
 # Healthy exclusively owns /etc/caddy/healthy.caddy. Other projects may add
 # their own site fragments to this shared root, but must preserve this exact

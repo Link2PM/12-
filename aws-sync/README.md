@@ -175,13 +175,13 @@ curl -i -X POST http://127.0.0.1:8787/api/sync \
 
 ### 共享 Caddy 配置所有权
 
-`/etc/caddy/Caddyfile` 是多项目共享入口，不归任一应用发布流程独占。Healthy 的完整站点块只能来自 `/etc/caddy/healthy.caddy`；共享主文件必须且只能在顶层保留一次：
+`/etc/caddy/Caddyfile` 是多项目共享入口，不归任一应用发布流程独占。`deploy/Caddyfile.example` 只是 import 片段，绝不能复制并覆盖共享主文件。Healthy 的完整站点块只能来自 `/etc/caddy/healthy.caddy`；共享主文件必须且只能在顶层保留一次：
 
 ```caddyfile
 import /etc/caddy/healthy.caddy
 ```
 
-其他项目可以更新自己的片段或 import，但不得在自己的仓库中复制、简化、内联或重新生成 `health.gaindar.com`。仅检查域名字符串存在、仅运行 `caddy validate`，都不能证明 `/api/sync` 仍会到达 `127.0.0.1:8787`。任何会改动共享主配置的发布，都必须先运行本仓库的契约检查，并在 reload 后执行 Healthy 的源站 smoke；失败时恢复本次变更前的 Caddy 备份并 reload。
+其他项目可以更新自己的片段或 import，但不得在自己的仓库中复制、简化、内联或重新生成 `health.gaindar.com`。契约检查器不会递归证明无关项目 import 的内容，因此仅检查域名字符串存在、仅运行本脚本或仅运行 `caddy validate`，都不能单独证明 `/api/sync` 仍会到达 `127.0.0.1:8787`。任何会改动共享主配置的发布，都必须依次运行本仓库的契约检查、Caddy 语法校验，并在 reload 后执行 Healthy 的源站 smoke；失败时恢复本次变更前的 Caddy 备份并 reload。
 
 上线前由运维完成以下操作：
 
@@ -196,8 +196,7 @@ import /etc/caddy/healthy.caddy
 
 ```bash
 python3 /opt/healthy-sync/verify_caddy_contract.py \
-  --root /etc/caddy/Caddyfile \
-  --fragment /etc/caddy/healthy.caddy
+  --root /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile
 
 # 必须穿过 Caddy；只请求 127.0.0.1:8787 无法证明共享路由仍存在。

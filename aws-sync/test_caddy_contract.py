@@ -50,6 +50,16 @@ health.gaindar.com {
 """
         self.assert_invalid(root=broken_root)
 
+    def test_alternative_inline_health_address_spellings_are_rejected(self) -> None:
+        for address in (
+            "https://health.gaindar.com",
+            "health.gaindar.com:443",
+            "https://health.gaindar.com:443",
+            "health.gaindar.com, another.example.test",
+        ):
+            with self.subTest(address=address):
+                self.assert_invalid(root=self.root_text + f"\n{address} {{\n respond 204\n}}\n")
+
     def test_static_only_fragment_fails_closed(self) -> None:
         static_only = """
 health.gaindar.com {
@@ -92,6 +102,29 @@ health.gaindar.com {
     def test_static_handler_must_retain_compression(self) -> None:
         uncompressed = self.fragment_text.replace("\t\t\tencode zstd gzip\n", "", 1)
         self.assert_invalid(fragment=uncompressed)
+
+    def test_candidate_fragment_cannot_be_paired_with_production_root(self) -> None:
+        with self.assertRaises(VERIFIER.ContractError):
+            VERIFIER.resolve_fragment_path(
+                VERIFIER.PRODUCTION_ROOT,
+                DEPLOY / "healthy.caddy",
+            )
+
+    def test_production_mode_is_bound_to_installed_fragment(self) -> None:
+        fragment_path, mode = VERIFIER.resolve_fragment_path(
+            VERIFIER.PRODUCTION_ROOT,
+            None,
+        )
+        self.assertEqual(fragment_path, Path(VERIFIER.CANONICAL_IMPORT))
+        self.assertEqual(mode, "installed")
+
+    def test_candidate_mode_is_explicit_and_separate(self) -> None:
+        fragment_path, mode = VERIFIER.resolve_fragment_path(
+            DEPLOY / "Caddyfile.example",
+            DEPLOY / "healthy.caddy",
+        )
+        self.assertEqual(fragment_path, DEPLOY / "healthy.caddy")
+        self.assertEqual(mode, "candidate")
 
 
 if __name__ == "__main__":
