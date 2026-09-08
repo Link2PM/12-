@@ -1,0 +1,35 @@
+# Canonical production fragment owned by the Healthy project.
+# Install as /etc/caddy/healthy.caddy and import it once from the shared
+# /etc/caddy/Caddyfile. Other projects must not copy or regenerate this block.
+health.gaindar.com {
+	tls internal
+
+	# route preserves the written order. Without it, the broad /api/* matcher
+	# can shadow the exact Healthy API matcher.
+	route {
+		@healthy_sync path /api/sync /api/sync/ /api/snapshot /api/snapshot/ /api/health /api/health/
+		handle @healthy_sync {
+			reverse_proxy 127.0.0.1:8787
+		}
+
+		# Never let an unknown /api path fall through to the PWA shell.
+		@unknown_api path /api /api/*
+		handle @unknown_api {
+			respond 404
+		}
+
+		handle {
+			# Static assets may be compressed. The API handler above remains outside
+			# encode so its strong snapshot ETag is not transformed by Caddy.
+			encode zstd gzip
+			root * /srv/healthy
+
+			# These files control upgrades and must be revalidated after every release.
+			@mutable path / /index.html /plan.js /sw.js
+			header @mutable Cache-Control "no-cache, must-revalidate"
+
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}
