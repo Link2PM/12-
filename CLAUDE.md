@@ -1,6 +1,6 @@
 # 体态修复训练手册 — 项目文档
 
-> **2026-09-04 状态提示**：v1.2.0 已上线；首次真实同步暴露出 CDN 压缩改写强 ETag 的兼容问题，v1.2.1 热修复待发布。训练快照、迁移前同步状态及恢复基线详见 `STATUS_2026-08-30.md`；仓库中的 Supabase / 旧 Cloudflare 读取实现仅作历史参考。
+> **2026-09-08 状态提示**：v1.2.1 已上线。2026-09-07 另一项目的共享 Caddy 发布曾删除 Healthy API 路由并造成 HTTP 404；生产路由已恢复，本仓库新增独立配置所有权与回归门禁以防复发。训练快照、迁移前同步状态及恢复基线详见本地 `STATUS_2026-08-30.md`；仓库中的 Supabase / 旧 Cloudflare 读取实现仅作历史参考。
 
 ## 项目概述
 
@@ -8,7 +8,7 @@
 
 **GitHub**: https://github.com/Link2PM/12-  
 **线上地址**: https://health.gaindar.com/ （用户已确认；原 GitHub Pages 地址不再视为生产入口）<br>
-**当前发布候选**: v1.2.1（生产环境当前为 v1.2.0）
+**当前生产版本**: v1.2.1
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式  
 **开源版**: 应用壳的通用化版本在 `healthy-app-template` 模板仓库（配套 `healthy-coach-skill` 生成个人计划），本仓库是个人实例 + 上游源头：应用壳改动先在这里验证，再同步到模板仓库
 
@@ -188,9 +188,10 @@ V4 使用 App Week 19 作为不补课的过渡/校准周，正式 12 周为 App 
 
 ## 开发注意事项
 
-1. **修改后验证**: 至少运行 `node scripts/validate-plan.js`、`node scripts/test-v4-integration.js`、`node --check plan.js`、`node --check sw.js`、index 内联脚本解析检查，以及 `python3 -m unittest discover -s aws-sync -p 'test_*.py' -v`
+1. **修改后验证**: 至少运行 `node scripts/validate-plan.js`、`node scripts/test-v4-integration.js`、`node --check plan.js`、`node --check sw.js`、index 内联脚本解析检查，以及 `python3 -m unittest discover -s aws-sync -p 'test_*.py' -v`；后者必须包含 `test_caddy_contract.py` 的配置所有权与路由负例
 2. **版本号**: 采用语义化三段式 `major.minor.patch`。版本集中在 `APP_VERSION`，同时检查设置页、同步 payload、JSON 导出、`plan.js?v=...` 和 Service Worker cache；本轮为 v1.2.1 / `healthy-v7`
 3. **新增 Store**: 需改 4 处：`LS_STORES` 数组、`DB_VERSION` + `onupgradeneeded`、`_lsPut/_lsGet/_lsDelete` 的 keyField 条件、`clearAllData` 的 stores 列表
 4. **导出兼容**: 新增数据表时，需同步更新 `exportJSON()`、`importData()`、`previewImport()`、`debugStorageStatus()`
 5. **推送/部署**: `git push origin main` 不等于生产发布。实现任务先冻结精确文件与哈希，再交给 CTO 任务完成 exact-tree 复核、服务端与静态资源部署、Cloudflare 清缓存和生产 smoke；GitHub Billing 可以登记为跳过，但不能写成 CI PASS
-6. **CSS 变量**: `--bg-0`~`--bg-3`(背景), `--text-0`~`--text-3`(文字), `--accent`(金色), `--good`(绿), `--warn`(橙), `--bad`(红)
+6. **共享 Caddy 所有权**: Healthy 只通过 `/etc/caddy/healthy.caddy` 拥有 `health.gaindar.com` 完整站点块；共享 `/etc/caddy/Caddyfile` 必须在顶层且仅一次 `import /etc/caddy/healthy.caddy`。其他项目不得复制、简化或内联该站点。任何共享 Caddy 变更必须在 reload 前运行 `verify_caddy_contract.py` 与 `caddy validate`，reload 后绕过 Cloudflare 直连本机 Caddy 验证 health=200、未鉴权 sync/snapshot=401、OPTIONS=204、未知 API=404；只检查后端回环健康或配置语法不算通过
+7. **CSS 变量**: `--bg-0`~`--bg-3`(背景), `--text-0`~`--text-3`(文字), `--accent`(金色), `--good`(绿), `--warn`(橙), `--bad`(红)

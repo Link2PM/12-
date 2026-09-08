@@ -158,26 +158,52 @@ curl -i -X POST http://127.0.0.1:8787/api/sync \
 
 - `deploy/healthy-sync.service`：受限权限的 systemd 单元；
 - `deploy/healthy-sync.env.example`：不含真实密钥的环境文件模板；
-- `deploy/Caddyfile.example`：推荐的同源 `/api/*` 路由及 PWA 缓存策略。
+- `deploy/healthy.caddy`：由 Healthy 独占维护的生产站点片段，包含同源 `/api/*` 路由及 PWA 缓存策略；
+- `deploy/Caddyfile.example`：共享主 Caddyfile 只导入上述片段的示例；
+- `deploy/verify_caddy_contract.py`：reload 前检查配置所有权、精确路由顺序、反向代理和压缩边界。
 
 建议目录：
 
 ```text
 /opt/healthy-sync/server.py
+/opt/healthy-sync/verify_caddy_contract.py
 /etc/healthy-sync.env          # root:root，0600
 /var/lib/healthy-sync/         # healthy-sync 用户，0700，位于持久化 EBS
 /etc/systemd/system/healthy-sync.service
+/etc/caddy/healthy.caddy       # root:root，0644；仅由 Healthy 发布流程更新
 ```
+
+### 共享 Caddy 配置所有权
+
+`/etc/caddy/Caddyfile` 是多项目共享入口，不归任一应用发布流程独占。Healthy 的完整站点块只能来自 `/etc/caddy/healthy.caddy`；共享主文件必须且只能在顶层保留一次：
+
+```caddyfile
+import /etc/caddy/healthy.caddy
+```
+
+其他项目可以更新自己的片段或 import，但不得在自己的仓库中复制、简化、内联或重新生成 `health.gaindar.com`。仅检查域名字符串存在、仅运行 `caddy validate`，都不能证明 `/api/sync` 仍会到达 `127.0.0.1:8787`。任何会改动共享主配置的发布，都必须先运行本仓库的契约检查，并在 reload 后执行 Healthy 的源站 smoke；失败时恢复本次变更前的 Caddy 备份并 reload。
 
 上线前由运维完成以下操作：
 
-1. 创建无登录权限的 `healthy-sync` 系统用户，并复制 `server.py`；
+1. 创建无登录权限的 `healthy-sync` 系统用户，并复制 `server.py` 与 `deploy/verify_caddy_contract.py`；
 2. 从示例生成 `/etc/healthy-sync.env`，用密码生成器创建新的随机 Bearer 密钥；不得沿用已暴露或提交过的值；
 3. 安装并启动 systemd 单元，只监听 `127.0.0.1:8787`；
-4. 将 Caddy 片段合并进现有站点，而不是覆盖其他路由；
+4. 将 `deploy/healthy.caddy` 安装为 `/etc/caddy/healthy.caddy`，在共享主文件中只保留一次顶层 import；不得把站点块内联进其他项目的配置模板；
 5. 先用独立端口、独立数据库和独立 `HEALTHY_SYNC_USER_KEY` 建立 staging 实例，跑完整写入测试；
-6. 前端切换到同源 `/api/sync` 后，确保 `/api/*` 不经过 Caddy `encode`，生产环境只做健康检查、鉴权/CORS 检查和已有正式快照的读取验证，不上传合成测试快照；
-7. 发布 PWA 时更新 Service Worker 缓存名，并清理 CDN 中的 `index.html`、`plan.js`、`sw.js` 缓存。
+6. reload 前运行 `verify_caddy_contract.py` 和 `caddy validate`；reload 后绕过 DNS/CDN 直连本机 Caddy，确认 `/api/health` 为 `200`、未鉴权 snapshot 与 sync 为 `401`、同源 OPTIONS 为 `204`、未知 API 为 `404`；任何一项失败都回滚 Caddy 配置，不得执行生产 POST；
+7. 前端切换到同源 `/api/sync` 后，确保 `/api/*` 不经过 Caddy `encode`，生产环境只做健康检查、鉴权/CORS 检查和已有正式快照的读取验证，不上传合成测试快照；
+8. 发布 PWA 时更新 Service Worker 缓存名，并清理 CDN 中的 `index.html`、`plan.js`、`sw.js` 缓存。
+
+```bash
+python3 /opt/healthy-sync/verify_caddy_contract.py \
+  --root /etc/caddy/Caddyfile \
+  --fragment /etc/caddy/healthy.caddy
+caddy validate --config /etc/caddy/Caddyfile
+
+# 必须穿过 Caddy；只请求 127.0.0.1:8787 无法证明共享路由仍存在。
+curl -ksS --resolve health.gaindar.com:443:127.0.0.1 \
+  https://health.gaindar.com/api/health
+```
 
 服务监听回环地址，EC2 安全组不需要为 8787 开放公网入站。Caddy 负责 TLS；应用侧仍会精确校验 Origin。
 
@@ -188,6 +214,9 @@ SQLite 适合当前单实例、单用户的快照用途，但数据库文件必�
 ## 上线验收清单
 
 - 本仓库 unittest 全绿；
+- `test_caddy_contract.py` 的正常配置通过，缺失 import、静态-only Healthy 块、缺失反代、宽匹配器前置和站点级压缩等负例全部 fail closed；
+- 共享主 Caddyfile 只 import `/etc/caddy/healthy.caddy`，其他项目的配置模板不包含内联 `health.gaindar.com` 站点块；
+- `caddy validate` 后，直连本机 Caddy 与公网的 `/api/health` 都为 `200`；不能用后端 `127.0.0.1:8787` 单独健康替代该门禁；
 - 未鉴权的 `POST` 与 `GET /api/snapshot` 均为 `401`；
 - 允许 Origin 的 `OPTIONS` 为 `204`，未知 Origin 为 `403`；
 - staging 中约 300 KiB 的脱敏真实结构样本上传成功，服务端 counts 与持久状态 SHA-256 可复核；
