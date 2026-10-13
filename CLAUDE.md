@@ -8,7 +8,7 @@
 
 **GitHub**: https://github.com/Link2PM/12-  
 **线上地址**: https://health.gaindar.com/ （用户已确认；原 GitHub Pages 地址不再视为生产入口）<br>
-**当前生产版本**: v1.2.1
+**当前生产版本**: v1.2.1（v1.3.0 / V5 计划待部署）
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式  
 **开源版**: 应用壳的通用化版本在 `healthy-app-template` 模板仓库（配套 `healthy-coach-skill` 生成个人计划），本仓库是个人实例 + 上游源头：应用壳改动先在这里验证，再同步到模板仓库
 
@@ -173,7 +173,9 @@ WEEKS = [
 - Phase 2 (Week 11-14): 渐进期
 - Phase 3 (Week 15-18): 目标期
 
-V4 使用 App Week 19 作为不补课的过渡/校准周，正式 12 周为 App Week 20–31（2026-09-07 至 2026-11-29）。标准周为周一、周二、周四、周五力量，周三 Zone 2 与步态观察；每天只把正式主训练计入 18 个周完成槽位，热身、Zone 2 与条件动作通过 `countsTowardProgress:false` 排除。
+V4 使用 App Week 19 作为不补课的过渡/校准周，原定正式 12 周为 App Week 20–31；2026-10-13 起被 V5 取代，实际执行到 Week 24 与 Week 25 周一/周二。
+
+V5 减脂期（v1.3.0，`V5_PLAN_META`）：Week 25 为切换周（周一/周二保留 V4 原课与 `w25-d1/d2-*` 位置 ID，周三 A、周四 B、周五基线测试、周六 D）；正式 8 周为 App Week 26–33（2026-10-19 至 12-13），周一 A、周二 B、周四 C、周五 D，周三/周六有氧恢复日，Week 5（App Week 30）减量。V5 动作位置 ID 使用 `v5-w<周>-d<日>-<序号>` 前缀，与 V4 不冲突；本阶段不排杠铃 RDL。正式文档：`训练与饮食计划_V5_减脂期_2026-10-13.md`。标准周为周一、周二、周四、周五力量，周三 Zone 2 与步态观察；每天只把正式主训练计入 18 个周完成槽位，热身、Zone 2 与条件动作通过 `countsTowardProgress:false` 排除。
 
 `exercise.id` 仍是每周/每天的位置 ID，旧 Week 3–18 不得修改。V4 新增稳定的 `movementId`；跨周历史聚合同时依赖保留的 canonical 动作名与 `EXERCISE_NAME_ALIASES`。同一动作不得随意改名，变式或展示文案变化要先写兼容映射。
 
@@ -189,7 +191,7 @@ V4 使用 App Week 19 作为不补课的过渡/校准周，正式 12 周为 App 
 ## 开发注意事项
 
 1. **修改后验证**: 至少运行 `node scripts/validate-plan.js`、`node scripts/test-v4-integration.js`、`node --check plan.js`、`node --check sw.js`、index 内联脚本解析检查，以及 `python3 -m unittest discover -s aws-sync -p 'test_*.py' -v`；后者必须包含 `test_caddy_contract.py` 的配置所有权与路由负例
-2. **版本号**: 采用语义化三段式 `major.minor.patch`。版本集中在 `APP_VERSION`，同时检查设置页、同步 payload、JSON 导出、`plan.js?v=...` 和 Service Worker cache；本轮为 v1.2.1 / `healthy-v7`
+2. **版本号**: 采用语义化三段式 `major.minor.patch`。版本集中在 `APP_VERSION`，同时检查设置页、同步 payload、JSON 导出、`plan.js?v=...` 和 Service Worker cache；本轮为 v1.3.0 / `healthy-v8`
 3. **新增 Store**: 需改 4 处：`LS_STORES` 数组、`DB_VERSION` + `onupgradeneeded`、`_lsPut/_lsGet/_lsDelete` 的 keyField 条件、`clearAllData` 的 stores 列表
 4. **导出兼容**: 新增数据表时，需同步更新 `exportJSON()`、`importData()`、`previewImport()`、`debugStorageStatus()`
 5. **推送/部署**: `git push origin main` 不等于生产发布。实现任务先冻结精确文件与哈希，再交给 CTO 任务完成 exact-tree 复核、服务端与静态资源部署、Cloudflare 清缓存和生产 smoke；GitHub Billing 可以登记为跳过，但不能写成 CI PASS

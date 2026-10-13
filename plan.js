@@ -899,6 +899,222 @@ const V4_TRANSITION_WEEK = {
   }])
 };
 
+// ============================================================
+// V5 减脂期计划（2026-10-14 起，App Week 25 周三 - Week 33）
+// ============================================================
+// 文档：训练与饮食计划 V5 · 减脂期（2026-10-13）。V4 的 Week 20–24 与
+// Week 25 周一/周二保持原样（已有完成日志），Week 25 周三起切换到 V5。
+// App 按日期固定星期：周一 A、周二 B、周四 C、周五 D；周三/周六有氧。
+// 漏掉的课在同一周的空档日顺延（在 App 里切到原定日期记录），不跨周补。
+const V5_PLAN_META = Object.freeze({
+  version: '5.0',
+  bridgeWeek: 25,
+  bridgeStartDate: '2026-10-14',
+  appStartWeek: 26,
+  appEndWeek: 33,
+  startDate: '2026-10-19',
+  endDate: '2026-12-13',
+  deloadCycleWeek: 5,
+  calories: '1750–1800 kcal/日',
+  protein: '120–130 g/日'
+});
+
+const V5_MOVEMENT_IDS = Object.freeze({
+  lowCardioWarmup: 'warmup-low-cardio',
+  wallSlide: 'wall-slide',
+  bandExternalRotation: 'band-external-rotation',
+  singleLegStance: 'single-leg-stance',
+  supportedBodyweightSplitSquat: 'supported-bodyweight-split-squat',
+  wallTouchHipHinge: 'wall-touch-hip-hinge',
+  weightedPullup: 'weighted-pull-up',
+  pullup: 'pull-up',
+  barbellBenchPress: 'barbell-bench-press',
+  seatedCableRow: 'seated-cable-row',
+  cableLateralRaise: 'cable-lateral-raise',
+  dumbbellCurl: 'dumbbell-curl',
+  cableFacePull: 'cable-face-pull',
+  barbellBackSquat: 'barbell-back-squat',
+  bulgarianSplitSquat: 'bulgarian-split-squat',
+  cableStandingLegCurl: 'cable-standing-leg-curl',
+  singleLegStepCalfRaise: 'single-leg-step-calf-raise',
+  deadBug: 'dead-bug',
+  machineInclinePress: 'machine-incline-press',
+  wideGripLatPulldown: 'wide-grip-lat-pulldown',
+  dumbbellLateralRaise: 'dumbbell-lateral-raise',
+  reversePecDeck: 'reverse-pec-deck',
+  cableTricepsPushdown: 'cable-triceps-pushdown',
+  barbellHipThrust: 'barbell-hip-thrust',
+  weightedBackExtension: 'weighted-back-extension',
+  singleLegHipThrust: 'single-leg-hip-thrust',
+  cableHipAbduction: 'cable-hip-abduction',
+  farmerCarry: 'farmer-carry'
+});
+
+const V5_RULES = '大动作 RIR 2–3、小动作 RIR 1–2；出现“勉强”即当天上限，不加重、不补组、不试极限；热身组单独标记。';
+const V5_SHOULDER_RULE = '右肩痛 ≥3/10 或越来越痛：当天停止，不换其他推类继续试；第 2 次出现就改为史密斯机平推或上斜推胸器械，固定 4 周。';
+
+function v5Exercise(name, movementId, sets, weight, tip, extra = {}) {
+  return { name, movementId, sets, weight: weight || '', tip: tip || '', ...extra };
+}
+function v5Warmup(name, movementId, sets, tip) {
+  return v5Exercise(name, movementId, sets, '', tip, { countsTowardProgress: false });
+}
+function v5Pick(isDeload, normal, deload) { return isDeload ? deload : normal; }
+
+function buildV5Day(appWeek, dayIndex, dayName, title, groups) {
+  let counter = 0;
+  return {
+    dayName,
+    dayType: 'training',
+    title,
+    skipWarmup: true,
+    skipMorning: true,
+    progressMode: 'main-only',
+    groups: groups.map(group => ({
+      ...group,
+      exercises: group.exercises.map(ex => ({ ...ex, id: `v5-w${appWeek}-d${dayIndex}-${++counter}` }))
+    }))
+  };
+}
+
+function v5UpperWarmup() {
+  return [
+    v5Warmup('低强度有氧热身', V5_MOVEMENT_IDS.lowCardioWarmup, '1×3分钟', '自行车或快走，只提高体温'),
+    v5Warmup('弹力带肩外旋', V5_MOVEMENT_IDS.bandExternalRotation, '1×10/侧', '低疲劳，不做到酸胀'),
+    v5Warmup('墙滑', V5_MOVEMENT_IDS.wallSlide, '1×8', '先检查左右肩；动作本身疼痛则删除')
+  ];
+}
+function v5LowerWarmup(hinge) {
+  return [
+    v5Warmup('低强度有氧热身', V5_MOVEMENT_IDS.lowCardioWarmup, '1×3分钟', '自行车或快走'),
+    v5Warmup('单腿站立', V5_MOVEMENT_IDS.singleLegStance, '1×20秒/侧', '观察足底和骨盆，练脚踝稳定'),
+    hinge
+      ? v5Warmup('墙触髋铰链', V5_MOVEMENT_IDS.wallTouchHipHinge, '1×8', '臀部向后触墙，腰背保持中立')
+      : v5Warmup('扶支撑自重分腿蹲', V5_MOVEMENT_IDS.supportedBodyweightSplitSquat, '1×5/侧', '膝盖跟脚尖方向走，不内扣')
+  ];
+}
+
+function buildV5SessionA(appWeek, dayIndex, dayName, label, isDeload) {
+  return buildV5Day(appWeek, dayIndex, dayName, `${label} ${dayName} · A 上肢力量（引体＋卧推）`, [
+    { title: '热身（8–10分钟）', description: '第一个动作再做 2–3 个递增组；热身组不计正式组。', exercises: v5UpperWarmup() },
+    { title: '主训练', description: V5_RULES, exercises: [
+      v5Exercise('负重引体', V5_MOVEMENT_IDS.weightedPullup, v5Pick(isDeload, '4×3', '2×3'), '+2.5kg 起（腰带或双脚夹哑铃）', 'RIR 2；4 组都完成 3 个后升到 4×4，再加重；记录附加重量'),
+      v5Exercise('杠铃卧推', V5_MOVEMENT_IDS.barbellBenchPress, v5Pick(isDeload, '3×8', '2×8'), '片20/总40kg；宽握、垂直推', `RIR 3；${V5_SHOULDER_RULE}`),
+      v5Exercise('坐姿绳索划船', V5_MOVEMENT_IDS.seatedCableRow, v5Pick(isDeload, '3×8–12', '2×8–12'), '70kg 起', '顶峰停 1 秒，肩胛先后收，不用腰后仰'),
+      v5Exercise('龙门架单臂侧平举', V5_MOVEMENT_IDS.cableLateralRaise, v5Pick(isDeload, '3×12–20/侧', '2×12–15/侧'), '轻重量起', '不耸肩；左上斜方酸胀就降重'),
+      v5Exercise('哑铃弯举', V5_MOVEMENT_IDS.dumbbellCurl, v5Pick(isDeload, '2×10–15', '1×10–15'), '', 'RIR 1–2；不借腰力'),
+      v5Exercise('绳索面拉', V5_MOVEMENT_IDS.cableFacePull, v5Pick(isDeload, '2×15', '1×15'), '轻', '拉到耳侧，肘高于手；保护肩的健康')
+    ]}
+  ]);
+}
+
+function buildV5SessionB(appWeek, dayIndex, dayName, label, isDeload) {
+  return buildV5Day(appWeek, dayIndex, dayName, `${label} ${dayName} · B 下肢 · 深蹲日`, [
+    { title: '热身（8–10分钟）', description: '深蹲另做空杆 → 60% → 80% 三个递增组，不计正式组。', exercises: v5LowerWarmup(false) },
+    { title: '主训练', description: V5_RULES, exercises: [
+      v5Exercise('杠铃深蹲', V5_MOVEMENT_IDS.barbellBackSquat, v5Pick(isDeload, '3×5–6', '2×5'), '能全程蹲到底的重量，预计片60/总80kg', '每 2 周录一次侧面视频；膝盖不内扣、蹲到底才算有效组'),
+      v5Exercise('保加利亚分腿蹲', V5_MOVEMENT_IDS.bulgarianSplitSquat, v5Pick(isDeload, '3×8/侧', '2×8/侧'), '当前用重（写清每手）', '先做弱侧，强侧只做到相同次数'),
+      v5Exercise('龙门架站姿腿弯举', V5_MOVEMENT_IDS.cableStandingLegCurl, v5Pick(isDeload, '3×10–15/侧', '2×10–12/侧'), '轻', '接脚踝绑带；替代腿弯举器械'),
+      v5Exercise('台阶单腿提踵', V5_MOVEMENT_IDS.singleLegStepCalfRaise, v5Pick(isDeload, '3×10–15/侧', '2×10–12/侧'), '自重起，再手持哑铃', '顶端停 1 秒；顺便练脚踝稳定'),
+      v5Exercise('死虫', V5_MOVEMENT_IDS.deadBug, v5Pick(isDeload, '2×8/侧', '1×8/侧'), '自重', '腰部可控；可换 Pallof Press')
+    ]}
+  ]);
+}
+
+function buildV5SessionC(appWeek, dayIndex, dayName, label, isDeload) {
+  return buildV5Day(appWeek, dayIndex, dayName, `${label} ${dayName} · C 上肢 · 肩宽和容量`, [
+    { title: '热身（8–10分钟）', description: '第一个动作再做 1–2 个轻递增组。', exercises: v5UpperWarmup() },
+    { title: '主训练', description: V5_RULES, exercises: [
+      v5Exercise('引体向上', V5_MOVEMENT_IDS.pullup, v5Pick(isDeload, '4组·每组留2个', '2组·每组留3个'), '自重', '记录 4 组总次数；目标每 1–2 周总数 +1–2'),
+      v5Exercise('器械上斜推胸', V5_MOVEMENT_IDS.machineInclinePress, v5Pick(isDeload, '3×8–12', '2×8–10'), '轻重量校准', V5_SHOULDER_RULE),
+      v5Exercise('高位下拉（宽握）', V5_MOVEMENT_IDS.wideGripLatPulldown, v5Pick(isDeload, '3×10–12', '2×10–12'), '', '肩胛先下沉再拉'),
+      v5Exercise('哑铃侧平举', V5_MOVEMENT_IDS.dumbbellLateralRaise, v5Pick(isDeload, '4×12–20', '2×12–15'), '5kg/手', '本阶段练肩宽的主力动作；耸肩前结束'),
+      v5Exercise('蝴蝶机反向飞鸟', V5_MOVEMENT_IDS.reversePecDeck, v5Pick(isDeload, '3×12–20', '2×12–15'), '轻', '练三角肌后束，改善圆肩外观'),
+      v5Exercise('绳索下压', V5_MOVEMENT_IDS.cableTricepsPushdown, v5Pick(isDeload, '2×10–15', '1×10–15'), '', '大臂贴身，RIR 1–2')
+    ]}
+  ]);
+}
+
+function buildV5SessionD(appWeek, dayIndex, dayName, label, isDeload) {
+  return buildV5Day(appWeek, dayIndex, dayName, `${label} ${dayName} · D 下肢 · 臀与后侧链`, [
+    { title: '热身（8–10分钟）', description: '臀推另做 1–2 个轻递增组。本阶段不做杠铃 RDL。', exercises: v5LowerWarmup(true) },
+    { title: '主训练', description: `${V5_RULES}髋铰链后不接卷腹。`, exercises: [
+      v5Exercise('杠铃臀推', V5_MOVEMENT_IDS.barbellHipThrust, v5Pick(isDeload, '3×8–10', '2×8'), '片70/总90kg', '顶端停 1 秒；三组都“正常”后再加重；不用腰过伸'),
+      v5Exercise('负重山羊挺身', V5_MOVEMENT_IDS.weightedBackExtension, v5Pick(isDeload, '3×10–15', '2×10–12'), '自重起，再抱杠铃片', '以髋为轴、上背微圆、臀部发力；腰部发酸就降重，仍不适换龙门架绳索髋屈伸'),
+      v5Exercise('单腿臀推', V5_MOVEMENT_IDS.singleLegHipThrust, v5Pick(isDeload, '2×10–12/侧', '1×10–12/侧'), '自重起', '右侧先做，左侧只做到相同次数'),
+      v5Exercise('龙门架站姿腿弯举', V5_MOVEMENT_IDS.cableStandingLegCurl, v5Pick(isDeload, '3×10–15/侧', '2×10–12/侧'), '轻', '一轮里第二次练腿后侧'),
+      v5Exercise('龙门架单侧髋外展', V5_MOVEMENT_IDS.cableHipAbduction, v5Pick(isDeload, '2×12–15/侧', '1×12–15/侧'), '轻', '右侧先做；练臀中肌，身体不侧倾'),
+      v5Exercise('农夫走', V5_MOVEMENT_IDS.farmerCarry, v5Pick(isDeload, '2×30–40米', '1×30米'), '22.5kg/手', '练握力；可换死悬 2 组')
+    ]}
+  ]);
+}
+
+function v5RecoveryDay(dayName, title, description) {
+  return { dayName, dayType: 'recovery', title, description, skipMorning: true, progressMode: 'main-only' };
+}
+function v5RestDay(title, description) {
+  return { dayName: '周日', dayType: 'rest', title, description, skipMorning: true, progressMode: 'main-only' };
+}
+
+function buildV5Week(appWeek, cycleWeek) {
+  const isDeload = cycleWeek === V5_PLAN_META.deloadCycleWeek;
+  const isFinal = cycleWeek === 8;
+  const label = `V5 Week ${cycleWeek}`;
+  const zone2Minutes = cycleWeek <= 2 ? 30 : 40;
+  const steps = cycleWeek <= 2 ? 6000 : 8000;
+  const stage = isDeload ? '减量周' : isFinal ? '复测周' : cycleWeek <= 4 ? '减脂期·前段' : '减脂期·后段';
+  const note = isDeload
+    ? '减量周：主项 2 组、辅助 1 组，重量不变或降 10%，RIR 4，不测任何东西。有氧和步数照常。'
+    : isFinal
+      ? '复测周：正常训练，另外测严格引体极限（单独一天、充分热身）、12 分钟有氧、腰围和照片，记到体测页。12 月中复盘下一阶段。'
+      : `顺序 A→B→C→D；漏掉的课在本周空档日顺延（在 App 切到原定日期记录），不跨周补。日均 ≥${steps} 步；Zone 2 每次 ${zone2Minutes} 分钟${cycleWeek >= 3 ? '；周六加 4×4 间歇' : ''}。热量 ${V5_PLAN_META.calories}，蛋白 ${V5_PLAN_META.protein}。`;
+  const wedDesc = `Zone 2 有氧 ${zone2Minutes} 分钟（心率约 115–132，能说整句话）；日均 ≥${steps} 步。如果本周有漏掉的课，今天可以顺延做。`;
+  const satDesc = cycleWeek >= 3 && !isDeload
+    ? `间歇 4×4 分钟（心率约 160–170，间隔 3 分钟慢走或慢骑）；或顺延本周漏掉的课。`
+    : `Zone 2 有氧 ${zone2Minutes} 分钟或轻松活动；也可以顺延本周漏掉的课。`;
+  const sunDesc = isFinal
+    ? '量腰围、拍正侧背照片，汇总 8 周：7 日均重、腰围、引体、12 分钟测试。'
+    : '晨起量腰围（肚脐水平，量 2 次取平均）；看本周 7 日均重和步数周均。第 2 周末按体重趋势校准热量。';
+  return {
+    weekNum: appWeek,
+    cycleWeek,
+    planVersion: V5_PLAN_META.version,
+    phase: `V5 · ${stage}（Week ${cycleWeek}/8）`,
+    note,
+    days: [
+      buildV5SessionA(appWeek, 1, '周一', label, isDeload),
+      buildV5SessionB(appWeek, 2, '周二', label, isDeload),
+      v5RecoveryDay('周三', `${label} 周三 · 有氧与步数`, wedDesc),
+      buildV5SessionC(appWeek, 4, '周四', label, isDeload),
+      buildV5SessionD(appWeek, 5, '周五', label, isDeload),
+      v5RecoveryDay('周六', `${label} 周六 · ${cycleWeek >= 3 && !isDeload ? '间歇有氧' : '有氧或轻松活动'}`, satDesc),
+      v5RestDay(`${label} 周日 · 休息与周复盘`, sunDesc)
+    ]
+  };
+}
+
+// Week 25（10/12–10/18）：周一/周二保留 V4 原课（可能已有记录），周三起 V5。
+function buildV5BridgeWeek() {
+  const v4 = buildV4Week(V5_PLAN_META.bridgeWeek, V5_PLAN_META.bridgeWeek - 19);
+  const label = 'V5 起步';
+  return {
+    weekNum: V5_PLAN_META.bridgeWeek,
+    cycleWeek: 0,
+    planVersion: V5_PLAN_META.version,
+    phase: 'V4 → V5 切换周（10/14 起执行 V5）',
+    note: '周一/周二为 V4 原课；周三起执行 V5：周三 A、周四 B、周五基线测试、周六 D。开始每天晨起称重、记录饮食与步数。',
+    days: [
+      v4.days[0],
+      v4.days[1],
+      buildV5SessionA(V5_PLAN_META.bridgeWeek, 3, '周三', label, false),
+      buildV5SessionB(V5_PLAN_META.bridgeWeek, 4, '周四', label, false),
+      v5RecoveryDay('周五', `${label} 周五 · 基线测试`, '12 分钟有氧测试（跑步机 1% 坡度或操场，尽力跑，记距离）；量腰围、拍正侧背照片；看手表静息心率。全部记到体测页。'),
+      buildV5SessionD(V5_PLAN_META.bridgeWeek, 6, '周六', label, false),
+      v5RestDay(`${label} 周日 · 休息`, '休息。确认下周四次训练的时间；继续晨起称重。')
+    ]
+  };
+}
+
 const WEEKS = [
   {
     weekNum: 3,
@@ -968,7 +1184,11 @@ const WEEKS = [
 
   // ========== V4 计划: Week 0 + 正式 12 周 (App Week 19-31) ==========
   V4_TRANSITION_WEEK,
-  ...Array.from({ length: 12 }, (_, i) => buildV4Week(20 + i, i + 1))
+  ...Array.from({ length: 5 }, (_, i) => buildV4Week(20 + i, i + 1)),
+
+  // ========== V5 减脂期: 切换周 Week 25 + 正式 8 周 (App Week 26-33) ==========
+  buildV5BridgeWeek(),
+  ...Array.from({ length: 8 }, (_, i) => buildV5Week(26 + i, i + 1))
 ];
 
 const HABITS = {
@@ -978,7 +1198,9 @@ const HABITS = {
     { id: 'h-protein', name: '蛋白质达标', icon: '🍗' },
     { id: 'h-creatine', name: '肌酸 3-5g', icon: '💊' },
     { id: 'h-fishoil', name: '鱼油', icon: '🐟' },
-    { id: 'h-fascia', name: '自主筋膜松解', icon: '🌀' }
+    { id: 'h-fascia', name: '自主筋膜松解', icon: '🌀' },
+    { id: 'h-weighin', name: '晨起称重', icon: '⚖️' },
+    { id: 'h-steps', name: '步数达标', icon: '🚶' }
   ],
   counter: [
     { id: 'h-water', name: '饮水', target: 8, unit: '杯' }
@@ -1000,7 +1222,9 @@ const METRICS = [
   { id: 'm-sideplank-l', name: '侧平板(左)', unit: '秒', tip: '至力竭' },
   { id: 'm-sideplank-r', name: '侧平板(右)', unit: '秒', tip: '至力竭' },
   { id: 'm-pullup-assist', name: '辅助引体所需重量', unit: 'kg', tip: '能做 5 次的最轻辅助' },
-  { id: 'm-tva', name: '主动腹横肌收紧时长', unit: '秒', tip: '能有意识维持多久' }
+  { id: 'm-tva', name: '主动腹横肌收紧时长', unit: '秒', tip: '能有意识维持多久' },
+  { id: 'm-cooper12', name: '12分钟测试距离', unit: 'm', tip: '同一跑步机 1% 坡度或同一操场，尽力跑 12 分钟' },
+  { id: 'm-resting-hr', name: '静息心率（周均）', unit: '次/分', tip: '手表周均值' }
 ];
 
 const NOTE_TEMPLATES = [
@@ -1101,7 +1325,20 @@ const VIDEO_MAP = {
   '哑铃悬挂': { q: '哑铃悬挂 握力训练' },
   
   // 有氧
-  'Zone 2 有氧': { q: 'zone 2 有氧 心率 训练' }
+  'Zone 2 有氧': { q: 'zone 2 有氧 心率 训练' },
+
+  // V5 新增
+  '负重引体': { q: '负重引体向上 腰带 教学' },
+  '龙门架单臂侧平举': { q: '龙门架 单臂侧平举 绳索 教学' },
+  '哑铃弯举': { q: '哑铃弯举 标准动作 教学' },
+  '绳索面拉': { q: 'face pull 绳索面拉 教学' },
+  '龙门架站姿腿弯举': { q: '龙门架 站姿腿弯举 脚踝绑带' },
+  '台阶单腿提踵': { q: '单腿提踵 台阶 小腿 教学' },
+  '高位下拉（宽握）': { q: '宽握高位下拉 教学 肩胛' },
+  '蝴蝶机反向飞鸟': { q: '蝴蝶机 反向飞鸟 三角肌后束' },
+  '负重山羊挺身': { q: '山羊挺身 臀腿版 45度 背部微圆' },
+  '单腿臀推': { q: '单腿臀推 教学' },
+  '龙门架单侧髋外展': { q: '龙门架 站姿髋外展 臀中肌' }
 };
 
 // 根据动作名查找视频信息
@@ -1139,7 +1376,8 @@ const EXERCISE_NAME_ALIASES = [
   ['辅助引体（离心）', '辅助引体', '弹力带辅助引体', '弹力带辅助引体(慢离心)', '离心引体', '离心延时引体'],
   ['引体向上', '完整引体向上', '多握法引体', 'EMOM 引体向上'],
   ['哑铃肩推', '哑铃肩推（W13评估后）', '哑铃推肩', '哑铃推肩(坐姿)', '哑铃推肩(坐姿靠背)', '推举(站姿)'],
-  ['弹力带面拉', '面拉'],
+  ['弹力带面拉', '面拉', '绳索面拉'],
+  ['负重山羊挺身', '山羊挺'],
   ['杠铃深蹲', '杠铃后蹲'],
   ['Pallof Press 抗旋转', 'Pallof Press'],
   ['悬垂举腿/仰卧举腿', '悬垂举腿', '悬垂举腿(腿可弯)'],
