@@ -17,7 +17,8 @@ function loadPlan(source) {
   vm.createContext(context);
   return vm.runInContext(
     `${source};({ PLAN_DATA, WEEKS, VIDEO_MAP, EXERCISE_NAME_ALIASES, getVideoForExercise, ` +
-      `v4Meta: typeof V4_PLAN_META === 'undefined' ? null : V4_PLAN_META })`,
+      `v4Meta: typeof V4_PLAN_META === 'undefined' ? null : V4_PLAN_META, ` +
+      `v5Meta: typeof V5_PLAN_META === 'undefined' ? null : V5_PLAN_META })`,
     context,
     { timeout: 5000 }
   );
@@ -701,7 +702,7 @@ function verifyServiceWorkerPrivacyRouting(swSource) {
 
   assert.strictEqual(isIntercepted('/api/snapshot'), false, 'private snapshot API must bypass Service Worker');
   assert.strictEqual(isIntercepted('/api/health'), false, 'all API routes must bypass Service Worker');
-  assert.strictEqual(isIntercepted('/plan.js?v=1.2.1'), true, 'versioned plan asset should be cached');
+  assert.strictEqual(isIntercepted('/plan.js?v=1.3.0'), true, 'versioned plan asset should be cached');
   assert.strictEqual(isIntercepted('/private-export.json'), false, 'arbitrary same-origin GET must not be cached');
   assert.strictEqual(isIntercepted('/index.html', { authorization: true }), false, 'authorized GET must never be cached');
   assert.strictEqual(isIntercepted('/week/20', { mode: 'navigate' }), true, 'navigation should retain offline fallback');
@@ -743,8 +744,9 @@ assert.strictEqual(current.v4Meta.appEndWeek, 31);
 assert.strictEqual(current.PLAN_DATA.startDate, '2026-05-11');
 
 // 3) V4 同一动作跨周使用稳定 movementId，正式完成率固定为 4/4/2/4/4。
-const v4Weeks = current.WEEKS.filter(week => week.weekNum >= 20 && week.weekNum <= 31);
-assert.strictEqual(v4Weeks.length, 12);
+//    V5 自 Week 25 周三起取代 V4，完整 V4 周为 Week 20-24。
+const v4Weeks = current.WEEKS.filter(week => week.weekNum >= 20 && week.weekNum <= 24);
+assert.strictEqual(v4Weeks.length, 5);
 const movementNameById = new Map();
 for (const week of v4Weeks) {
   assert.strictEqual(week.cycleWeek, week.weekNum - 19);
@@ -760,6 +762,54 @@ for (const week of v4Weeks) {
       movementNameById.set(ex.movementId, ex.name);
     }
   }
+}
+
+// 3b) V5：切换周保留 V4 周一/周二原课；正式 8 周 Week 26-33，周一 A/周二 B/周四 C/周五 D。
+assert.strictEqual(appWeekFor('2026-10-14'), 25);
+assert.strictEqual(appWeekFor('2026-10-19'), 26);
+assert.strictEqual(appWeekFor('2026-12-13'), 33);
+assert.strictEqual(appWeekFor('2026-12-14'), 34);
+assert(current.v5Meta, 'V5_PLAN_META missing');
+assert.strictEqual(current.v5Meta.version, '5.0');
+assert.strictEqual(current.v5Meta.appStartWeek, 26);
+assert.strictEqual(current.v5Meta.appEndWeek, 33);
+assert.strictEqual(current.WEEKS[current.WEEKS.length - 1].weekNum, 33, 'plan must end at Week 33');
+const bridge = current.WEEKS.find(week => week.weekNum === 25);
+assert(bridge, 'missing bridge Week 25');
+const v4Week25Ids = ['w25-d1-', 'w25-d2-'];
+bridge.days.slice(0, 2).forEach((day, i) => {
+  const ids = day.groups.flatMap(g => g.exercises).map(ex => ex.id);
+  assert(ids.length > 0 && ids.every(id => id.startsWith(v4Week25Ids[i])), `Week 25 day ${i} must keep V4 position ids`);
+});
+assert.strictEqual(JSON.stringify(bridge.days.map(day => day.dayType)),
+  JSON.stringify(['training', 'training', 'training', 'training', 'recovery', 'training', 'rest']), 'bridge week day types');
+const v5Weeks = current.WEEKS.filter(week => week.weekNum >= 26 && week.weekNum <= 33);
+assert.strictEqual(v5Weeks.length, 8);
+const v5SlotPattern = JSON.stringify([6, 5, 0, 6, 6, 0, 0]);
+for (const week of v5Weeks) {
+  assert.strictEqual(week.cycleWeek, week.weekNum - 25);
+  assert.strictEqual(week.planVersion, '5.0');
+  const slots = week.days.map(day => (day.groups || []).flatMap(g => g.exercises || [])
+    .filter(ex => ex.countsTowardProgress !== false).length);
+  assert.strictEqual(JSON.stringify(slots), v5SlotPattern, `V5 Week ${week.weekNum} progress slots`);
+  const names = week.days.flatMap(day => (day.groups || []).flatMap(g => g.exercises || [])).map(ex => ex.name);
+  assert(!names.includes('罗马尼亚硬拉'), `V5 Week ${week.weekNum} must not program barbell RDL`);
+}
+const deloadWeek = v5Weeks.find(week => week.cycleWeek === 5);
+assert(allWeekExercises([deloadWeek]).filter(ex => ex.countsTowardProgress !== false)
+  .every(ex => /^[12]/.test(ex.sets)), 'V5 deload week must be 1–2 sets per movement');
+const allV5 = [bridge, ...v5Weeks];
+for (const ex of allWeekExercises(allV5)) {
+  assert(ex.movementId, `${ex.name} missing movementId`);
+  if (movementNameById.has(ex.movementId)) {
+    assert.strictEqual(movementNameById.get(ex.movementId), ex.name, `${ex.movementId} maps to multiple names`);
+  } else {
+    movementNameById.set(ex.movementId, ex.name);
+  }
+}
+const v5Names = [...new Set(allWeekExercises(allV5).map(ex => ex.name))];
+for (const name of v5Names) {
+  assert(current.VIDEO_MAP[name], `${name} missing explicit VIDEO_MAP entry`);
 }
 
 // 4) 每个 V4 动作均有明确 Bilibili 搜索映射，而不只依赖未知动作兜底。
@@ -835,7 +885,7 @@ if (usePrivateSnapshot) {
 }
 assert(!aliasesFor('器械推胸（平推）', current.EXERCISE_NAME_ALIASES).has('器械上斜推胸'), 'flat/incline press histories must stay separate');
 
-const v4ExerciseByName = new Map(allWeekExercises(v4Weeks).map(ex => [ex.name, ex]));
+const v4ExerciseByName = new Map(allWeekExercises([...v4Weeks, bridge, ...v5Weeks]).map(ex => [ex.name, ex]));
 const mappableHistoricalLogs = snapshot.workoutLogs.map(log => {
   if (log.movementId) return null;
   const historicalName = exerciseNameByPositionId.get(log.exerciseId);
@@ -848,7 +898,8 @@ assert(mappableHistoricalLogs.every(id => movementNameById.has(id)), 'historical
 
 const index = fs.readFileSync(indexPath, 'utf8');
 const migration = await executeProductionWorkoutBackfill(index, current, snapshot.workoutLogs);
-const expectedBackfillCount = usePrivateSnapshot ? 99 : historicalCanonicalNames.length;
+// V5 新增面拉/绳索下压/器械上斜推胸/山羊挺/单腿臀推的稳定 ID：99 → 145。
+const expectedBackfillCount = usePrivateSnapshot ? 145 : historicalCanonicalNames.length;
 assert.strictEqual(mappableHistoricalLogs.length, expectedBackfillCount, `${historyFixtureLabel} expected mappable count`);
 assert.strictEqual(migration.firstFilled, expectedBackfillCount, `${historyFixtureLabel} production backfill count`);
 const migratedCount = migration.records.filter(record => record.movementId && record.movementId !== 'preexisting-movement-id').length;
@@ -862,8 +913,8 @@ if (!usePrivateSnapshot) {
 
 // 6) 版本、缓存与同步安全配置静态门禁。
 const sw = fs.readFileSync(swPath, 'utf8');
-assert(index.includes("const APP_VERSION = '1.2.1'"));
-assert(index.includes('plan.js?v=1.2.1'));
+assert(index.includes("const APP_VERSION = '1.3.0'"));
+assert(index.includes('plan.js?v=1.3.0'));
 assert(!index.includes("appVersion: '1.1.0'"));
 assert(index.includes("const DEFAULT_SYNC_URL = '/api/sync'"));
 assert(index.includes("new Set(['startDate', 'aiProvider', 'aiModel'])"));
@@ -884,8 +935,8 @@ assert(index.includes('receipt.counts[field] !== expectedCounts[field]'));
 assert(index.includes("localStorage.removeItem('noteBackup')"));
 assert(index.includes("result = await syncToCloud({ silent: false })"));
 assert(index.includes("window.addEventListener('storage'"));
-assert(sw.includes("const CACHE_NAME = 'healthy-v7'"));
-assert(sw.includes("'./plan.js?v=1.2.1'"));
+assert(sw.includes("const CACHE_NAME = 'healthy-v8'"));
+assert(sw.includes("'./plan.js?v=1.3.0'"));
 assert(sw.includes("url.pathname.startsWith('/api/')"));
 assert(sw.includes("e.request.headers.has('Authorization')"));
 assert(sw.indexOf("url.pathname.startsWith('/api/')") < sw.indexOf('e.respondWith('));
@@ -895,7 +946,7 @@ await verifyProductionSyncDirtyTokenConcurrency(index);
 await verifyLostReceiptUpgradeRecovery(index);
 await verifyLegacySettingsMigrationOrder(index);
 
-console.log(`PASS: V4 ${v4Weeks.length} weeks, ${v4Names.length} unique exercise names, ${migration.firstFilled} historical logs backfilled by production code (${historyFixtureLabel}), full legacy objects/history/video/version/sync guards verified.`);
+console.log(`PASS: V4 ${v4Weeks.length} weeks + V5 bridge + ${v5Weeks.length} weeks (${v5Names.length} V5 names), ${v4Names.length} unique exercise names, ${migration.firstFilled} historical logs backfilled by production code (${historyFixtureLabel}), full legacy objects/history/video/version/sync guards verified.`);
 }
 
 runHistoryAndStaticChecks().catch(error => {
