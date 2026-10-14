@@ -1,5 +1,7 @@
 # 体态修复训练手册 — 项目文档
 
+> **2026-10-14 发布回执**：v1.3.0（V5 减脂期计划，PR #6，main `3e06434`）已部署到生产，仅替换 `/srv/healthy` 的 `index.html`/`plan.js`/`sw.js`（经 SSM `AWS-RunShellScript`，实例 `i-0381db4f8d525912d`，ap-southeast-1）。服务器与公网 SHA-256：`index.html`=`dc7e31fc31a34ec482cdf7c070b0e51755200a231e4608f9edc5ce86278f2276`，`plan.js`=`a035a3accca23430dcc69db220e2f8babe73437d30e593014f51448bd081d4db`，`sw.js`=`5e97fba14221dcbad56ec27b890b3803fd5a16d015d6506980078e07d10106d5`；公网 `APP_VERSION=1.3.0`、`healthy-v8`、`/api/health`=200、未鉴权 snapshot=401；`healthy-sync` 与 Caddy 均 active，未改数据库、服务与 Caddy。部署前备份：`/var/backups/healthy/20261014T073406Z-pre-v1.3.0`。GitHub 无 CI，状态为本地 required-equivalent 门禁通过，`NOT CI PASS`。
+>
 > **2026-09-08 状态提示**：v1.2.1 已上线。2026-09-07 另一项目的共享 Caddy 发布曾删除 Healthy API 路由并造成 HTTP 404；生产路由已恢复，本仓库新增独立配置所有权与回归门禁以防复发。训练快照、迁移前同步状态及恢复基线详见本地 `STATUS_2026-08-30.md`；仓库中的 Supabase / 旧 Cloudflare 读取实现仅作历史参考。
 
 ## 项目概述
@@ -8,7 +10,7 @@
 
 **GitHub**: https://github.com/Link2PM/12-  
 **线上地址**: https://health.gaindar.com/ （用户已确认；原 GitHub Pages 地址不再视为生产入口）<br>
-**当前生产版本**: v1.2.1（v1.3.0 / V5 计划待部署）
+**当前生产版本**: v1.3.0（V5 计划，2026-10-14 上线）
 **用户**: 单人自用工具，运行在 iOS Safari / PWA 模式  
 **开源版**: 应用壳的通用化版本在 `healthy-app-template` 模板仓库（配套 `healthy-coach-skill` 生成个人计划），本仓库是个人实例 + 上游源头：应用壳改动先在这里验证，再同步到模板仓库
 
